@@ -40,20 +40,34 @@
   const OB_HP_MAX = 3;
   const MOVE_MAX = 5;
 
-  // Directions: 0=N,1=E,2=S,3=W
-  const DIRS = [
-    {dx: 0, dy:-1},
-    {dx: 1, dy: 0},
-    {dx: 0, dy: 1},
-    {dx:-1, dy: 0},
-  ];
-  const DIR_NAMES = ["N","E","S","W"];
+  // Hull directions (90°): 0=N,1=E,2=S,3=W
+const DIR4 = [
+  { dx:  0, dy: -1 }, // N
+  { dx:  1, dy:  0 }, // E
+  { dx:  0, dy:  1 }, // S
+  { dx: -1, dy:  0 }, // W
+];
+
+// Turret directions (45°): 0=N,1=NE,2=E,3=SE,4=S,5=SW,6=W,7=NW
+const DIR8 = [
+  { dx:  0, dy: -1 }, // N
+  { dx:  1, dy: -1 }, // NE
+  { dx:  1, dy:  0 }, // E
+  { dx:  1, dy:  1 }, // SE
+  { dx:  0, dy:  1 }, // S
+  { dx: -1, dy:  1 }, // SW
+  { dx: -1, dy:  0 }, // W
+  { dx: -1, dy: -1 }, // NW
+];
+
+const DIR4_NAMES = ["N","E","S","W"];
+const DIR8_NAMES = ["N","NE","E","SE","S","SW","W","NW"];
 
   // Board: obstacle HP per cell (0 means empty)
   const ob = Array.from({length:GRID}, () => Array(GRID).fill(0));
 
-  const player = { x:1, y:1, facing:1, turret:1, alive:true, color:"#55d6ff", name:"Player" };
-  const cpu    = { x:8, y:8, facing:3, turret:3, alive:true, color:"#ff5b6b", name:"CPU" };
+ const player = { x:1, y:1, facing:1, turret:2, alive:true, color:"#55d6ff", name:"Player" }; // turret E
+ const cpu    = { x:8, y:8, facing:3, turret:6, alive:true, color:"#ff5b6b", name:"CPU" };   // turret W
 
   let state = "PLAYER_TURN"; // PLAYER_TURN | CPU_TURN | GAME_OVER
   let movesLeft = MOVE_MAX;
@@ -141,7 +155,7 @@
 
   function tryMove(tank, forward=true) {
     if (movesLeft <= 0) return false;
-    const d = DIRS[tank.facing];
+    const d = DIR4[tank.facing];
     const dx = forward ? d.dx : -d.dx;
     const dy = forward ? d.dy : -d.dy;
     const nx = tank.x + dx;
