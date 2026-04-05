@@ -212,8 +212,8 @@ const DIR8_NAMES = ["N","NE","E","SE","S","SW","W","NW"];
       const cur = q.shift();
       const cd = dist.get(key(cur.x,cur.y));
       for (let dir=0; dir<4; dir++) {
-        const nx = cur.x + DIRS[dir].dx;
-        const ny = cur.y + DIRS[dir].dy;
+        const nx = cur.x + DIR4[dir].dx;
+        const ny = cur.y + DIR4[dir].dy;
         if (!inBounds(nx,ny)) continue;
         if (ob[ny][nx] > 0) continue;
         if (isTankAt(nx,ny) && !(nx===startX && ny===startY)) continue;
@@ -307,7 +307,7 @@ const DIR8_NAMES = ["N","NE","E","SE","S","SW","W","NW"];
         const man = Math.abs(x-player.x)+Math.abs(y-player.y);
         let coverAdj = 0;
         for (let dir=0; dir<4; dir++) {
-          const nx = x+DIRS[dir].dx, ny = y+DIRS[dir].dy;
+          const nx = x+DIR4[dir].dx, ny = y+DIR4[dir].dy;
           if (inBounds(nx,ny) && ob[ny][nx]>0) coverAdj++;
         }
         // Lower is better. Encourage cover.
@@ -446,7 +446,7 @@ const DIR8_NAMES = ["N","NE","E","SE","S","SW","W","NW"];
       // hull direction arrow
       const cx = t.x*TILE + TILE/2;
       const cy = t.y*TILE + TILE/2;
-      const fd = DIRS[t.facing];
+      const fd = DIR4[t.facing];
       ctx.strokeStyle = "#001018";
       ctx.lineWidth = 4;
       ctx.beginPath();
@@ -455,7 +455,7 @@ const DIR8_NAMES = ["N","NE","E","SE","S","SW","W","NW"];
       ctx.stroke();
 
       // turret direction line
-      const td = DIRS[t.turret];
+      const td = DIR8[t.turret];
       ctx.strokeStyle = "#ffffff";
       ctx.lineWidth = 3;
       ctx.beginPath();
@@ -477,8 +477,8 @@ const DIR8_NAMES = ["N","NE","E","SE","S","SW","W","NW"];
     hud.innerHTML =
       `<div><b>Turn:</b> ${turnName}</div>` +
       `<div><b>Moves left:</b> ${movesLeft}</div>` +
-      `<div><b>Player hull/turret:</b> ${DIR_NAMES[player.facing]} / ${DIR_NAMES[player.turret]}</div>` +
-      `<div><b>CPU hull/turret:</b> ${DIR_NAMES[cpu.facing]} / ${DIR_NAMES[cpu.turret]}</div>` +
+      `<div><b>Player hull/turret:</b> ${DIR4_NAMES[player.facing]} / ${DIR8_NAMES[player.turret]}</div>` +
+      `<div><b>CPU hull/turret:</b> ${DIR4_NAMES[cpu.facing]} / ${DIR8_NAMES[cpu.turret]}</div>` +
       `<div style="margin-top:8px;"><b>Status:</b> ${message}</div>`;
 
     requestAnimationFrame(draw);
