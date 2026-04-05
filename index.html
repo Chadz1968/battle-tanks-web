@@ -319,7 +319,7 @@ const DIR8_NAMES = ["N","NE","E","SE","S","SW","W","NW"];
       }
       // Aim turret toward player if aligned, else keep it.
       if (targetCell.x === player.x) targetTurret = (player.y < targetCell.y) ? 0 : 4;
-      else if (targetCell.y === player.y) targetTurret = (player.x > targetCell.x) ? 1 : 3;
+      else if (targetCell.y === player.y) targetTurret = (player.x > targetCell.x) ? 2 : 6;
     }
 
     // Move along path to targetCell (up to movesLeft)
