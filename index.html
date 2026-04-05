@@ -281,7 +281,7 @@ const DIR8_NAMES = ["N","NE","E","SE","S","SW","W","NW"];
       if (d > MOVE_MAX) continue;
       const [xStr,yStr] = k.split(",");
       const x = +xStr, y = +yStr;
-      for (let tdir=0; tdir<4; tdir++) {
+      for (let tdir=0; tdir<8; tdir++) {
         if (rayHitsTank(x,y,tdir,player)) {
           bestKill = {x,y,tdir,steps:d};
           break;
@@ -318,7 +318,7 @@ const DIR8_NAMES = ["N","NE","E","SE","S","SW","W","NW"];
         }
       }
       // Aim turret toward player if aligned, else keep it.
-      if (targetCell.x === player.x) targetTurret = (player.y < targetCell.y) ? 0 : 2;
+      if (targetCell.x === player.x) targetTurret = (player.y < targetCell.y) ? 0 : 4;
       else if (targetCell.y === player.y) targetTurret = (player.x > targetCell.x) ? 1 : 3;
     }
 
