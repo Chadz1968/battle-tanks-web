@@ -150,7 +150,7 @@ const DIR8_NAMES = ["N","NE","E","SE","S","SW","W","NW"];
     tank.facing = (tank.facing + dirDelta + 4) % 4;
   }
   function rotateTurret(tank, dirDelta) {
-    tank.turret = (tank.turret + dirDelta + 4) % 4;
+    tank.turret = (tank.turret + dirDelta + 8) % 8;
   }
 
   function tryMove(tank, forward=true) {
