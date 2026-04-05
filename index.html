@@ -171,7 +171,7 @@ const DIR8_NAMES = ["N","NE","E","SE","S","SW","W","NW"];
   // --- Shooting ---
   function shoot(fromTank) {
     lastShotTrace = [];
-    const d = DIRS[fromTank.turret];
+    const d = DIR8[fromTank.turret];
     let x = fromTank.x + d.dx;
     let y = fromTank.y + d.dy;
 
@@ -229,7 +229,7 @@ const DIR8_NAMES = ["N","NE","E","SE","S","SW","W","NW"];
   }
 
   function rayHitsTank(fromX, fromY, turretDir, target) {
-    const d = DIRS[turretDir];
+    const d = DIR8[turretDir];
     let x = fromX + d.dx;
     let y = fromY + d.dy;
     while (inBounds(x,y)) {
@@ -241,7 +241,7 @@ const DIR8_NAMES = ["N","NE","E","SE","S","SW","W","NW"];
   }
 
   function rayFirstObstacle(fromX, fromY, turretDir) {
-    const d = DIRS[turretDir];
+    const d = DIR8[turretDir];
     let x = fromX + d.dx;
     let y = fromY + d.dy;
     while (inBounds(x,y)) {
