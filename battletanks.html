@@ -1,0 +1,486 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Tank Battle (10x10 Turn-Based Prototype)</title>
+  <style>
+    body { background:#111; color:#eee; font-family:system-ui,Segoe UI,Arial; display:flex; gap:16px; padding:16px; }
+    canvas { background:#0b0f14; border:1px solid #2a2f3a; }
+    .panel { max-width:360px; line-height:1.35; }
+    .kbd { padding:2px 6px; border:1px solid #444; border-radius:6px; background:#1a1f2a; }
+    .muted { color:#aab; }
+  </style>
+</head>
+<body>
+  <canvas id="c" width="640" height="640"></canvas>
+  <div class="panel">
+    <h2 style="margin:0 0 8px 0;">Tank Battle (Prototype)</h2>
+    <div id="hud" class="muted"></div>
+    <hr style="border:0;border-top:1px solid #2a2f3a;margin:12px 0;">
+    <div>
+      <div><span class="kbd">W</span>/<span class="kbd">S</span> move forward/back (costs moves)</div>
+      <div><span class="kbd">A</span>/<span class="kbd">D</span> rotate hull (free)</div>
+      <div><span class="kbd">Q</span>/<span class="kbd">E</span> rotate turret (free)</div>
+      <div><span class="kbd">Space</span> shoot (ends turn)</div>
+      <div><span class="kbd">Shift</span> end turn</div>
+    </div>
+    <p class="muted">
+      Obstacles are tetrominoes; each tile has HP (3). Shoot them to create holes.
+    </p>
+  </div>
+
+<script>
+(() => {
+  const canvas = document.getElementById("c");
+  const ctx = canvas.getContext("2d");
+  const hud = document.getElementById("hud");
+
+  const GRID = 10;
+  const TILE = 64;
+  const OB_HP_MAX = 3;
+  const MOVE_MAX = 5;
+
+  // Directions: 0=N,1=E,2=S,3=W
+  const DIRS = [
+    {dx: 0, dy:-1},
+    {dx: 1, dy: 0},
+    {dx: 0, dy: 1},
+    {dx:-1, dy: 0},
+  ];
+  const DIR_NAMES = ["N","E","S","W"];
+
+  // Board: obstacle HP per cell (0 means empty)
+  const ob = Array.from({length:GRID}, () => Array(GRID).fill(0));
+
+  const player = { x:1, y:1, facing:1, turret:1, alive:true, color:"#55d6ff", name:"Player" };
+  const cpu    = { x:8, y:8, facing:3, turret:3, alive:true, color:"#ff5b6b", name:"CPU" };
+
+  let state = "PLAYER_TURN"; // PLAYER_TURN | CPU_TURN | GAME_OVER
+  let movesLeft = MOVE_MAX;
+  let lastShotTrace = []; // cells bullet passed through (for quick visual feedback)
+  let message = "Your turn.";
+
+  // --- Tetromino definitions (4 blocks each) ---
+  // Each shape is offsets from an anchor. Rotations handled later.
+  const TETROS = [
+    // I
+    [{x:0,y:0},{x:1,y:0},{x:2,y:0},{x:3,y:0}],
+    // O
+    [{x:0,y:0},{x:1,y:0},{x:0,y:1},{x:1,y:1}],
+    // T
+    [{x:0,y:0},{x:1,y:0},{x:2,y:0},{x:1,y:1}],
+    // S
+    [{x:1,y:0},{x:2,y:0},{x:0,y:1},{x:1,y:1}],
+    // Z
+    [{x:0,y:0},{x:1,y:0},{x:1,y:1},{x:2,y:1}],
+    // J
+    [{x:0,y:0},{x:0,y:1},{x:1,y:1},{x:2,y:1}],
+    // L
+    [{x:2,y:0},{x:0,y:1},{x:1,y:1},{x:2,y:1}],
+  ];
+
+  function rotate90(p) { return {x: -p.y, y: p.x}; }
+
+  function normalizeOffsets(points) {
+    // shift so min x,y become 0,0 (keeps within bounds after rotation)
+    let minX = Infinity, minY = Infinity;
+    for (const p of points) { minX = Math.min(minX,p.x); minY = Math.min(minY,p.y); }
+    return points.map(p => ({x: p.x - minX, y: p.y - minY}));
+  }
+
+  function rotated(points, r) {
+    let out = points.map(p => ({x:p.x,y:p.y}));
+    for (let i=0;i<r;i++) out = out.map(rotate90);
+    return normalizeOffsets(out);
+  }
+
+  function inBounds(x,y){ return x>=0 && x<GRID && y>=0 && y<GRID; }
+  function isTankAt(x,y){
+    return (player.alive && player.x===x && player.y===y) || (cpu.alive && cpu.x===x && cpu.y===y);
+  }
+  function isOccupied(x,y){
+    return !inBounds(x,y) || ob[y][x]>0 || isTankAt(x,y);
+  }
+
+  function placeRandomObstacles(count=6) {
+    let tries = 0;
+    let placed = 0;
+    while (placed < count && tries < 2000) {
+      tries++;
+      const base = TETROS[Math.floor(Math.random()*TETROS.length)];
+      const r = Math.floor(Math.random()*4);
+      const shape = rotated(base, r);
+      const ax = Math.floor(Math.random()*GRID);
+      const ay = Math.floor(Math.random()*GRID);
+
+      // validate placement
+      let ok = true;
+      for (const p of shape) {
+        const x = ax + p.x, y = ay + p.y;
+        if (!inBounds(x,y)) { ok=false; break; }
+        if (ob[y][x]>0) { ok=false; break; }
+        if ((x===player.x && y===player.y) || (x===cpu.x && y===cpu.y)) { ok=false; break; }
+      }
+      if (!ok) continue;
+
+      for (const p of shape) {
+        const x = ax + p.x, y = ay + p.y;
+        ob[y][x] = OB_HP_MAX;
+      }
+      placed++;
+    }
+  }
+
+  // --- Movement & rotation ---
+  function rotateHull(tank, dirDelta) {
+    tank.facing = (tank.facing + dirDelta + 4) % 4;
+  }
+  function rotateTurret(tank, dirDelta) {
+    tank.turret = (tank.turret + dirDelta + 4) % 4;
+  }
+
+  function tryMove(tank, forward=true) {
+    if (movesLeft <= 0) return false;
+    const d = DIRS[tank.facing];
+    const dx = forward ? d.dx : -d.dx;
+    const dy = forward ? d.dy : -d.dy;
+    const nx = tank.x + dx;
+    const ny = tank.y + dy;
+    if (!inBounds(nx,ny)) return false;
+    if (ob[ny][nx] > 0) return false;
+    if (isTankAt(nx,ny)) return false;
+    tank.x = nx; tank.y = ny;
+    movesLeft--;
+    return true;
+  }
+
+  // --- Shooting ---
+  function shoot(fromTank) {
+    lastShotTrace = [];
+    const d = DIRS[fromTank.turret];
+    let x = fromTank.x + d.dx;
+    let y = fromTank.y + d.dy;
+
+    while (inBounds(x,y)) {
+      lastShotTrace.push({x,y});
+
+      // hit other tank?
+      const target = (fromTank === player) ? cpu : player;
+      if (target.alive && target.x===x && target.y===y) {
+        target.alive = false;
+        state = "GAME_OVER";
+        message = `${fromTank.name} wins! Direct hit.`;
+        return;
+      }
+
+      // hit obstacle?
+      if (ob[y][x] > 0) {
+        ob[y][x]--;
+        message = (ob[y][x]===0)
+          ? "Shot destroyed an obstacle tile (hole created)."
+          : "Shot damaged an obstacle tile.";
+        return;
+      }
+
+      x += d.dx;
+      y += d.dy;
+    }
+    message = "Shot missed (left the battlefield).";
+  }
+
+  // --- CPU AI ---
+  function bfsReachable(startX, startY, maxSteps) {
+    const key = (x,y)=>`${x},${y}`;
+    const q = [{x:startX,y:startY}];
+    const dist = new Map([[key(startX,startY),0]]);
+    const prev = new Map(); // key -> {px,py}
+    while (q.length) {
+      const cur = q.shift();
+      const cd = dist.get(key(cur.x,cur.y));
+      for (let dir=0; dir<4; dir++) {
+        const nx = cur.x + DIRS[dir].dx;
+        const ny = cur.y + DIRS[dir].dy;
+        if (!inBounds(nx,ny)) continue;
+        if (ob[ny][nx] > 0) continue;
+        if (isTankAt(nx,ny) && !(nx===startX && ny===startY)) continue;
+
+        const nk = key(nx,ny);
+        if (dist.has(nk)) continue;
+        dist.set(nk, cd+1);
+        prev.set(nk, {px:cur.x, py:cur.y});
+        if (cd+1 < maxSteps) q.push({x:nx,y:ny});
+      }
+    }
+    return {dist, prev};
+  }
+
+  function rayHitsTank(fromX, fromY, turretDir, target) {
+    const d = DIRS[turretDir];
+    let x = fromX + d.dx;
+    let y = fromY + d.dy;
+    while (inBounds(x,y)) {
+      if (target.alive && target.x===x && target.y===y) return true;
+      if (ob[y][x] > 0) return false;
+      x += d.dx; y += d.dy;
+    }
+    return false;
+  }
+
+  function rayFirstObstacle(fromX, fromY, turretDir) {
+    const d = DIRS[turretDir];
+    let x = fromX + d.dx;
+    let y = fromY + d.dy;
+    while (inBounds(x,y)) {
+      if (ob[y][x] > 0) return {x,y};
+      if (player.alive && player.x===x && player.y===y) return null;
+      x += d.dx; y += d.dy;
+    }
+    return null;
+  }
+
+  function reconstructPath(prev, endX, endY, startX, startY) {
+    const key = (x,y)=>`${x},${y}`;
+    let cur = {x:endX,y:endY};
+    const out = [];
+    while (!(cur.x===startX && cur.y===startY)) {
+      out.push(cur);
+      const p = prev.get(key(cur.x,cur.y));
+      if (!p) break;
+      cur = {x:p.px, y:p.py};
+    }
+    out.reverse();
+    return out;
+  }
+
+  function cpuTakeTurn() {
+    if (state !== "CPU_TURN") return;
+    if (!cpu.alive || !player.alive) return;
+
+    movesLeft = MOVE_MAX;
+    message = "CPU thinking...";
+
+    const {dist, prev} = bfsReachable(cpu.x, cpu.y, MOVE_MAX+1);
+    let bestKill = null;
+
+    // 1) Can we move somewhere and get a kill shot?
+    for (const [k, d] of dist.entries()) {
+      if (d > MOVE_MAX) continue;
+      const [xStr,yStr] = k.split(",");
+      const x = +xStr, y = +yStr;
+      for (let tdir=0; tdir<4; tdir++) {
+        if (rayHitsTank(x,y,tdir,player)) {
+          bestKill = {x,y,tdir,steps:d};
+          break;
+        }
+      }
+      if (bestKill) break;
+    }
+
+    // 2) Otherwise, pick a “good” move: get closer and/or near cover
+    let targetCell = null;
+    let targetTurret = cpu.turret;
+
+    if (bestKill) {
+      targetCell = {x:bestKill.x, y:bestKill.y};
+      targetTurret = bestKill.tdir;
+    } else {
+      // Score reachable cells: prefer closer to player and adjacent to cover
+      let bestScore = Infinity;
+      for (const [k, d] of dist.entries()) {
+        if (d > MOVE_MAX) continue;
+        const [xStr,yStr] = k.split(",");
+        const x = +xStr, y = +yStr;
+        const man = Math.abs(x-player.x)+Math.abs(y-player.y);
+        let coverAdj = 0;
+        for (let dir=0; dir<4; dir++) {
+          const nx = x+DIRS[dir].dx, ny = y+DIRS[dir].dy;
+          if (inBounds(nx,ny) && ob[ny][nx]>0) coverAdj++;
+        }
+        // Lower is better. Encourage cover.
+        const score = man - coverAdj*0.75 + d*0.15;
+        if (score < bestScore) {
+          bestScore = score;
+          targetCell = {x,y};
+        }
+      }
+      // Aim turret toward player if aligned, else keep it.
+      if (targetCell.x === player.x) targetTurret = (player.y < targetCell.y) ? 0 : 2;
+      else if (targetCell.y === player.y) targetTurret = (player.x > targetCell.x) ? 1 : 3;
+    }
+
+    // Move along path to targetCell (up to movesLeft)
+    const path = reconstructPath(prev, targetCell.x, targetCell.y, cpu.x, cpu.y);
+    for (const step of path) {
+      if (movesLeft <= 0) break;
+      // Face the step direction and move forward
+      const dx = step.x - cpu.x, dy = step.y - cpu.y;
+      let face = cpu.facing;
+      if (dx===1) face=1;
+      else if (dx===-1) face=3;
+      else if (dy===1) face=2;
+      else if (dy===-1) face=0;
+      cpu.facing = face;
+      // forward move should always work because BFS validated
+      cpu.x = step.x; cpu.y = step.y;
+      movesLeft--;
+    }
+
+    // Set turret
+    cpu.turret = targetTurret;
+
+    // Shoot if kill shot exists now
+    if (rayHitsTank(cpu.x,cpu.y,cpu.turret,player)) {
+      shoot(cpu);
+      if (state !== "GAME_OVER") {
+        state = "PLAYER_TURN";
+        movesLeft = MOVE_MAX;
+        message = "CPU shot (miss?) — Your turn.";
+      }
+      return;
+    }
+
+    // Optional: if player is in line but blocked by obstacle, shoot the first obstacle tile to “dig”
+    const block = rayFirstObstacle(cpu.x,cpu.y,cpu.turret);
+    if (block) {
+      shoot(cpu); // will damage that blocking tile
+    } else {
+      message = "CPU ended turn.";
+    }
+
+    if (state !== "GAME_OVER") {
+      state = "PLAYER_TURN";
+      movesLeft = MOVE_MAX;
+      message = "Your turn.";
+    }
+  }
+
+  // --- Input handling ---
+  window.addEventListener("keydown", (e) => {
+    if (state === "GAME_OVER") return;
+    if (state !== "PLAYER_TURN") return;
+
+    lastShotTrace = [];
+
+    const k = e.key.toLowerCase();
+    const isShift = (e.key === "Shift");
+    if (k === "a") rotateHull(player, -1);
+    else if (k === "d") rotateHull(player, +1);
+    else if (k === "q") rotateTurret(player, -1);
+    else if (k === "e") rotateTurret(player, +1);
+    else if (k === "w") {
+      if (!tryMove(player, true)) message = "Blocked or no moves left.";
+    }
+    else if (k === "s") {
+      if (!tryMove(player, false)) message = "Blocked or no moves left.";
+    }
+    else if (e.code === "Space") {
+      shoot(player);
+      if (state !== "GAME_OVER") {
+        state = "CPU_TURN";
+        message = "CPU turn...";
+      }
+    }
+    else if (isShift) {
+      state = "CPU_TURN";
+      message = "CPU turn...";
+    }
+
+    e.preventDefault();
+  });
+
+  // --- Rendering ---
+  function draw() {
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+
+    // grid
+    ctx.strokeStyle = "#1d2330";
+    for (let i=0;i<=GRID;i++){
+      ctx.beginPath(); ctx.moveTo(i*TILE,0); ctx.lineTo(i*TILE,GRID*TILE); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(0,i*TILE); ctx.lineTo(GRID*TILE,i*TILE); ctx.stroke();
+    }
+
+    // obstacles
+    for (let y=0;y<GRID;y++){
+      for (let x=0;x<GRID;x++){
+        const hp = ob[y][x];
+        if (hp<=0) continue;
+        const t = hp/OB_HP_MAX;
+        // darker when damaged
+        const col = `rgb(${Math.floor(90+60*t)},${Math.floor(120+50*t)},${Math.floor(90+60*t)})`;
+        ctx.fillStyle = col;
+        ctx.fillRect(x*TILE+6, y*TILE+6, TILE-12, TILE-12);
+
+        // HP pips
+        ctx.fillStyle = "#0b0f14";
+        for (let i=0;i<hp;i++){
+          ctx.fillRect(x*TILE+10+i*10, y*TILE+10, 6, 6);
+        }
+      }
+    }
+
+    // shot trace
+    for (const cell of lastShotTrace) {
+      ctx.fillStyle = "rgba(255,255,255,0.12)";
+      ctx.fillRect(cell.x*TILE+2, cell.y*TILE+2, TILE-4, TILE-4);
+    }
+
+    function drawTank(t) {
+      if (!t.alive) return;
+      ctx.fillStyle = t.color;
+      ctx.fillRect(t.x*TILE+10, t.y*TILE+10, TILE-20, TILE-20);
+
+      // hull direction arrow
+      const cx = t.x*TILE + TILE/2;
+      const cy = t.y*TILE + TILE/2;
+      const fd = DIRS[t.facing];
+      ctx.strokeStyle = "#001018";
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.moveTo(cx,cy);
+      ctx.lineTo(cx + fd.dx*18, cy + fd.dy*18);
+      ctx.stroke();
+
+      // turret direction line
+      const td = DIRS[t.turret];
+      ctx.strokeStyle = "#ffffff";
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(cx,cy);
+      ctx.lineTo(cx + td.dx*26, cy + td.dy*26);
+      ctx.stroke();
+
+      // outline
+      ctx.strokeStyle = "rgba(255,255,255,0.35)";
+      ctx.lineWidth = 2;
+      ctx.strokeRect(t.x*TILE+10, t.y*TILE+10, TILE-20, TILE-20);
+    }
+
+    drawTank(player);
+    drawTank(cpu);
+
+    // HUD
+    const turnName = (state==="PLAYER_TURN") ? "PLAYER" : (state==="CPU_TURN" ? "CPU" : "GAME OVER");
+    hud.innerHTML =
+      `<div><b>Turn:</b> ${turnName}</div>` +
+      `<div><b>Moves left:</b> ${movesLeft}</div>` +
+      `<div><b>Player hull/turret:</b> ${DIR_NAMES[player.facing]} / ${DIR_NAMES[player.turret]}</div>` +
+      `<div><b>CPU hull/turret:</b> ${DIR_NAMES[cpu.facing]} / ${DIR_NAMES[cpu.turret]}</div>` +
+      `<div style="margin-top:8px;"><b>Status:</b> ${message}</div>`;
+
+    requestAnimationFrame(draw);
+  }
+
+  // --- Init ---
+  placeRandomObstacles(7);
+  draw();
+
+  // CPU loop: run when CPU_TURN becomes active
+  setInterval(() => {
+    if (state === "CPU_TURN" && cpu.alive && player.alive) cpuTakeTurn();
+  }, 120);
+
+})();
+</script>
+</body>
+</html>
+``
