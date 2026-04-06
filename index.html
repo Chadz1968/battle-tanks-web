@@ -101,7 +101,72 @@ const cpu    = { x:8, y:8, rx:8, ry:8, facing:3, turret:6, alive:true, color:"#f
   let cpuPlan = null;
 
   // { fromX,fromY,toX,toY,start,face }
-  let cpuAnim = null; 
+  let cpuAnim = null;
+
+  function buildCpuPlan() {
+  // reset per-turn movement budget
+  movesLeft = MOVE_MAX;
+
+  const {dist, prev} = bfsReachable(cpu.x, cpu.y, MOVE_MAX+1);
+
+  let bestKill = null;
+
+  // Can we move somewhere and get a kill shot?
+  for (const [k, d] of dist.entries()) {
+    if (d > MOVE_MAX) continue;
+    const [xStr,yStr] = k.split(",");
+    const x = +xStr, y = +yStr;
+
+    for (let tdir=0; tdir<8; tdir++) {
+      if (rayHitsTank(x,y,tdir,player)) { bestKill = {x,y,tdir,steps:d}; break; }
+    }
+    if (bestKill) break;
+  }
+
+  let targetCell = null;
+  let targetTurret = cpu.turret;
+
+  if (bestKill) {
+    targetCell = {x:bestKill.x, y:bestKill.y};
+    targetTurret = bestKill.tdir;
+  } else {
+    // pick a “good” move: closer to player and/or adjacent to cover
+    let bestScore = Infinity;
+    for (const [k, d] of dist.entries()) {
+      if (d > MOVE_MAX) continue;
+      const [xStr,yStr] = k.split(",");
+      const x = +xStr, y = +yStr;
+
+      const man = Math.abs(x-player.x)+Math.abs(y-player.y);
+      let coverAdj = 0;
+
+      for (let dir=0; dir<4; dir++) {
+        const nx = x + DIR4[dir].dx, ny = y + DIR4[dir].dy; // IMPORTANT: DIR4 not DIRS
+        if (inBounds(nx,ny) && ob[ny][nx] > 0) coverAdj++;
+      }
+
+      const score = man - coverAdj*0.75 + d*0.15;
+      if (score < bestScore) { bestScore = score; targetCell = {x,y}; }
+    }
+
+    // aim turret if aligned
+    if (targetCell.x === player.x) targetTurret = (player.y < targetCell.y) ? 0 : 4;
+    else if (targetCell.y === player.y) targetTurret = (player.x > targetCell.x) ? 2 : 6;
+  }
+
+  // path to target
+  const path = reconstructPath(prev, targetCell.x, targetCell.y, cpu.x, cpu.y);
+
+  // Convert path into step list with facing
+  const steps = path.slice(0, MOVE_MAX).map(step => {
+    const dx = step.x - cpu.x;
+    const dy = step.y - cpu.y;
+    // NOTE: dx/dy here is relative to ORIGINAL cpu; we’ll compute face later per step
+    return {x: step.x, y: step.y};
+  });
+
+  return { steps, turret: targetTurret };
+}
 
   function rotate90(p) { return {x: -p.y, y: p.x}; }
 
@@ -277,144 +342,80 @@ const cpu    = { x:8, y:8, rx:8, ry:8, facing:3, turret:6, alive:true, color:"#f
     return out;
   }
 
-  function cpuTakeTurn() {
-    if (state !== "CPU_TURN") return;
-    if (!cpu.alive || !player.alive) return;
+  function cpuTakeTurn(now) {
+  if (state !== "CPU_TURN") return;
+  if (!cpu.alive || !player.alive) return;
 
-    movesLeft = MOVE_MAX;
+  // Build plan once at start of CPU turn
+  if (!cpuPlan) {
     message = "CPU thinking...";
-
-    const {dist, prev} = bfsReachable(cpu.x, cpu.y, MOVE_MAX+1);
-    let bestKill = null;
-
-    // 1) Can we move somewhere and get a kill shot?
-    for (const [k, d] of dist.entries()) {
-      if (d > MOVE_MAX) continue;
-      const [xStr,yStr] = k.split(",");
-      const x = +xStr, y = +yStr;
-      for (let tdir=0; tdir<8; tdir++) {
-        if (rayHitsTank(x,y,tdir,player)) {
-          bestKill = {x,y,tdir,steps:d};
-          break;
-        }
-      }
-      if (bestKill) break;
-    }
-
-    // 2) Otherwise, pick a “good” move: get closer and/or near cover
-    let targetCell = null;
-    let targetTurret = cpu.turret;
-
-    if (bestKill) {
-      targetCell = {x:bestKill.x, y:bestKill.y};
-      targetTurret = bestKill.tdir;
-    } else {
-      // Score reachable cells: prefer closer to player and adjacent to cover
-      let bestScore = Infinity;
-      for (const [k, d] of dist.entries()) {
-        if (d > MOVE_MAX) continue;
-        const [xStr,yStr] = k.split(",");
-        const x = +xStr, y = +yStr;
-        const man = Math.abs(x-player.x)+Math.abs(y-player.y);
-        let coverAdj = 0;
-        for (let dir=0; dir<4; dir++) {
-          const nx = x+DIR4[dir].dx, ny = y+DIR4[dir].dy;
-          if (inBounds(nx,ny) && ob[ny][nx]>0) coverAdj++;
-        }
-        // Lower is better. Encourage cover.
-        const score = man - coverAdj*0.75 + d*0.15;
-        if (score < bestScore) {
-          bestScore = score;
-          targetCell = {x,y};
-        }
-      }
-      // Aim turret toward player if aligned, else keep it.
-      if (targetCell.x === player.x) targetTurret = (player.y < targetCell.y) ? 0 : 4;
-      else if (targetCell.y === player.y) targetTurret = (player.x > targetCell.x) ? 2 : 6;
-    }
-
-    // Move along path to targetCell (up to movesLeft)
-    const path = reconstructPath(prev, targetCell.x, targetCell.y, cpu.x, cpu.y);
-    for (const step of path) {
-      if (movesLeft <= 0) break;
-      // Face the step direction and move forward
-      const dx = step.x - cpu.x, dy = step.y - cpu.y;
-      let face = cpu.facing;
-      if (dx===1) face=1;
-      else if (dx===-1) face=3;
-      else if (dy===1) face=2;
-      else if (dy===-1) face=0;
-      cpu.facing = face;
-      // forward move should always work because BFS validated
-      cpu.x = step.x; cpu.y = step.y;
-      movesLeft--;
-    }
-
-    // Set turret
-    cpu.turret = targetTurret;
-
-    // Shoot if kill shot exists now
-    if (rayHitsTank(cpu.x,cpu.y,cpu.turret,player)) {
-      shoot(cpu);
-      if (state !== "GAME_OVER") {
-        state = "PLAYER_TURN";
-        movesLeft = MOVE_MAX;
-        message = "CPU shot (miss?) — Your turn.";
-      }
-      return;
-    }
-
-    // Optional: if player is in line but blocked by obstacle, shoot the first obstacle tile to “dig”
-    const block = rayFirstObstacle(cpu.x,cpu.y,cpu.turret);
-    if (block) {
-      shoot(cpu); // will damage that blocking tile
-    } else {
-      message = "CPU ended turn.";
-    }
-
-    if (state !== "GAME_OVER") {
-      state = "PLAYER_TURN";
-      movesLeft = MOVE_MAX;
-      message = "Your turn.";
-    }
+    cpuPlan = buildCpuPlan();
+    message = "CPU moving...";
   }
 
-  // --- Input handling ---
-  window.addEventListener("keydown", (e) => {
-    if (state === "GAME_OVER") return;
-    if (state !== "PLAYER_TURN") return;
+  // If we’re currently animating a step, update interpolation
+  if (cpuAnim) {
+    const t = Math.min(1, (now - cpuAnim.start) / CPU_STEP_MS);
+    cpu.rx = lerp(cpuAnim.fromX, cpuAnim.toX, t);
+    cpu.ry = lerp(cpuAnim.fromY, cpuAnim.toY, t);
 
-    lastShotTrace = [];
+    if (t >= 1) {
+      // snap to cell and finish step
+      cpu.x = cpuAnim.toX; cpu.y = cpuAnim.toY;
+      cpu.rx = cpu.x; cpu.ry = cpu.y;
+      cpu.facing = cpuAnim.face;
+      movesLeft = Math.max(0, movesLeft - 1);
+      cpuAnim = null;
+    }
+    return; // wait until this step completes
+  }
 
-    const k = e.key.toLowerCase();
-    const isShift = (e.key === "Shift");
-    if (k === "a") rotateHull(player, -1);
-    else if (k === "d") rotateHull(player, +1);
-    else if (k === "q") rotateTurret(player, -1);
-    else if (k === "e") rotateTurret(player, +1);
-    else if (k === "w") {
-      if (!tryMove(player, true)) message = "Blocked or no moves left.";
-    }
-    else if (k === "s") {
-      if (!tryMove(player, false)) message = "Blocked or no moves left.";
-    }
-    else if (e.code === "Space") {
-      shoot(player);
-      if (state !== "GAME_OVER") {
-        state = "CPU_TURN";
-        message = "CPU turn...";
-      }
-    }
-    else if (isShift) {
-      state = "CPU_TURN";
-      message = "CPU turn...";
-    }
+  // No active animation: start next step if any
+  if (cpuPlan.steps.length > 0 && movesLeft > 0) {
+    const next = cpuPlan.steps.shift();
 
-    e.preventDefault();
-  });
+    const dx = next.x - cpu.x;
+    const dy = next.y - cpu.y;
+
+    let face = cpu.facing;
+    if (dx === 1) face = 1;
+    else if (dx === -1) face = 3;
+    else if (dy === 1) face = 2;
+    else if (dy === -1) face = 0;
+
+    cpuAnim = {
+      fromX: cpu.x, fromY: cpu.y,
+      toX: next.x, toY: next.y,
+      start: now,
+      face
+    };
+    return;
+  }
+
+  // Movement finished: rotate turret + shoot/end
+  cpu.turret = cpuPlan.turret;
+
+  if (rayHitsTank(cpu.x, cpu.y, cpu.turret, player)) {
+    shoot(cpu);
+  } else {
+    const block = rayFirstObstacle(cpu.x, cpu.y, cpu.turret);
+    if (block) shoot(cpu);
+    else message = "CPU ended turn.";
+  }
+
+  // cleanup and pass turn back
+  cpuPlan = null;
+  cpuAnim = null;
+
+  if (state !== "GAME_OVER") {
+    state = "PLAYER_TURN";
+    movesLeft = MOVE_MAX;
+    message = "Your turn.";
+  }
+}
 
   // --- Rendering ---
-  function draw() {
+  function draw(now) {
     ctx.clearRect(0,0,canvas.width,canvas.height);
 
     // grid
@@ -496,7 +497,13 @@ const cpu    = { x:8, y:8, rx:8, ry:8, facing:3, turret:6, alive:true, color:"#f
       `<div><b>CPU hull/turret:</b> ${DIR4_NAMES[cpu.facing]} / ${DIR8_NAMES[cpu.turret]}</div>` +
       `<div style="margin-top:8px;"><b>Status:</b> ${message}</div>`;
 
-    requestAnimationFrame(draw);
+    
+    if (state === "CPU_TURN" && cpu.alive && player.alive) {
+    cpuTakeTurn(now);
+    }
+
+
+      requestAnimationFrame(draw);
   }
 
   // --- Init ---
