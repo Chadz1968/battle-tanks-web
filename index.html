@@ -63,10 +63,10 @@ const DIR8 = [
 const DIR4_NAMES = ["N","E","S","W"];
 const DIR8_NAMES = ["N","NE","E","SE","S","SW","W","NW"];
 
-  // Board: obstacle HP per cell (0 means empty)
-  const ob = Array.from({length:GRID}, () => Array(GRID).fill(0));
+// Board: obstacle HP per cell (0 means empty)
+const ob = Array.from({length:GRID}, () => Array(GRID).fill(0));
 
- const player = { x:1, y:1, rx:1, ry:1, facing:1, turret:2, alive:true, color:"#55d6ff", name:"Player" };
+const player = { x:1, y:1, rx:1, ry:1, facing:1, turret:2, alive:true, color:"#55d6ff", name:"Player" };
 const cpu    = { x:8, y:8, rx:8, ry:8, facing:3, turret:6, alive:true, color:"#ff5b6b", name:"CPU" };
 
   let state = "PLAYER_TURN"; // PLAYER_TURN | CPU_TURN | GAME_OVER
@@ -92,6 +92,16 @@ const cpu    = { x:8, y:8, rx:8, ry:8, facing:3, turret:6, alive:true, color:"#f
     // L
     [{x:2,y:0},{x:0,y:1},{x:1,y:1},{x:2,y:1}],
   ];
+
+  // CPU animation speed per tile (tweak this)
+  const CPU_STEP_MS = 160; 
+  const lerp = (a,b,t) => a + (b-a)*t;
+  
+  // { steps: [{x,y,face}], turret:number, willShoot:boolean }
+  let cpuPlan = null;
+
+  // { fromX,fromY,toX,toY,start,face }
+  let cpuAnim = null; 
 
   function rotate90(p) { return {x: -p.y, y: p.x}; }
 
@@ -164,6 +174,7 @@ const cpu    = { x:8, y:8, rx:8, ry:8, facing:3, turret:6, alive:true, color:"#f
     if (ob[ny][nx] > 0) return false;
     if (isTankAt(nx,ny)) return false;
     tank.x = nx; tank.y = ny;
+    tank.rx = tank.x; tank.ry = tank.y;
     movesLeft--;
     return true;
   }
@@ -440,10 +451,12 @@ const cpu    = { x:8, y:8, rx:8, ry:8, facing:3, turret:6, alive:true, color:"#f
 
     function drawTank(t) {
       if (!t.alive) return;
-      ctx.fillStyle = t.color;
-      ctx.fillRect(t.x*TILE+10, t.y*TILE+10, TILE-20, TILE-20);
+      const drawX = (t.rx ?? t.x);
+      const drawY = (t.ry ?? t.y);
 
-      // hull direction arrow
+      ctx.fillStyle = t.color;
+      ctx.fillRect(drawX*TILE+10, drawY*TILE+10, TILE-20, TILE-20);
+
       const cx = t.x*TILE + TILE/2;
       const cy = t.y*TILE + TILE/2;
 
