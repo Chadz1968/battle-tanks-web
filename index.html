@@ -500,7 +500,7 @@ const cpu    = { x:8, y:8, rx:8, ry:8, facing:3, turret:6, alive:true, color:"#f
     
     if (state === "CPU_TURN" && cpu.alive && player.alive) {
     cpuTakeTurn(now);
-    }
+}
 
 
       requestAnimationFrame(draw);
@@ -510,10 +510,7 @@ const cpu    = { x:8, y:8, rx:8, ry:8, facing:3, turret:6, alive:true, color:"#f
   placeRandomObstacles(7);
   draw();
 
-  // CPU loop: run when CPU_TURN becomes active
-  setInterval(() => {
-    if (state === "CPU_TURN" && cpu.alive && player.alive) cpuTakeTurn();
-  }, 120);
+  
 
 })();
 </script>
