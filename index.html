@@ -498,8 +498,8 @@ window.addEventListener("keydown", (e) => {
       ctx.fillStyle = t.color;
       ctx.fillRect(drawX*TILE+10, drawY*TILE+10, TILE-20, TILE-20);
 
-      const cx = t.x*TILE + TILE/2;
-      const cy = t.y*TILE + TILE/2;
+      const cx = drawX*TILE + TILE/2;
+      const cy = drawY*TILE + TILE/2;
 
       // hull direction arrow
       const fd = DIR4[t.facing];
