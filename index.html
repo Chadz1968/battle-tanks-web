@@ -31,6 +31,7 @@
 
 <script>
 (() => {
+  const GAME_VERSION = "v0.1";
   const canvas = document.getElementById("c");
   const ctx = canvas.getContext("2d");
   const hud = document.getElementById("hud");
@@ -548,6 +549,7 @@ window.addEventListener("keydown", (e) => {
       `<div><b>Player hull/turret:</b> ${DIR4_NAMES[player.facing]} / ${DIR8_NAMES[player.turret]}</div>` +
       `<div><b>CPU hull/turret:</b> ${DIR4_NAMES[cpu.facing]} / ${DIR8_NAMES[cpu.turret]}</div>` +
       `<div style="margin-top:8px;"><b>Status:</b> ${message}</div>`;
+      `<div class="muted" style="margin-top:6px;">Version ${GAME_VERSION}</div>`;
 
     
     if (state === "CPU_TURN" && cpu.alive && player.alive) {
