@@ -96,6 +96,12 @@ const cpu    = { x:8, y:8, rx:8, ry:8, facing:3, turret:6, alive:true, color:"#f
   // CPU animation speed per tile (tweak this)
   const CPU_STEP_MS = 160; 
   const lerp = (a,b,t) => a + (b-a)*t;
+
+  // returns normalized vector (dx,dy) with length 1, or {0,0} if input is zero
+  function normalized(dx, dy) {
+  const len = Math.hypot(dx, dy);
+  return len === 0 ? {dx: 0, dy: 0} : {dx: dx / len, dy: dy / len};
+}
   
   // { steps: [{x,y,face}], turret:number, willShoot:boolean }
   let cpuPlan = null;
@@ -512,11 +518,17 @@ window.addEventListener("keydown", (e) => {
 
       // turret direction line
       const td = DIR8[t.turret];
+      const n = normalized(td.dx, td.dy);
+      const TURRET_LEN = 26;
+
       ctx.strokeStyle = "#ffffff";
       ctx.lineWidth = 3;
       ctx.beginPath();
-      ctx.moveTo(cx,cy);
-      ctx.lineTo(cx + td.dx*26, cy + td.dy*26);
+      ctx.moveTo(cx, cy);
+      ctx.lineTo(
+        cx + n.dx * TURRET_LEN,
+        cy + n.dy * TURRET_LEN
+      );
       ctx.stroke();
 
       // outline
