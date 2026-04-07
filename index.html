@@ -441,6 +441,33 @@ const cpu    = { x:8, y:8, rx:8, ry:8, facing:3, turret:6, alive:true, hp:3, col
     return out;
   }
 
+  function computeShotPath(fromTank) {
+    const d = DIR8[fromTank.turret];
+    let x = fromTank.x + d.dx;
+    let y = fromTank.y + d.dy;
+    const cells = [];
+
+    while (inBounds(x,y)) {
+      cells.push({x,y});
+
+      // stop at tank
+      const target = (fromTank === player) ? cpu : player;
+      if (target.alive && target.x===x && target.y===y) {
+        return {cells, hitType: 'tank', targetX: target.x, targetY: target.y};
+      }
+
+      // stop at obstacle
+      if (ob[y][x] > 0) {
+        return {cells, hitType: 'obstacle', targetX: x, targetY: y};
+      }
+
+      x += d.dx;
+      y += d.dy;
+    }
+
+    return {cells, hitType: 'miss', targetX: null, targetY: null};
+  }
+
   function cpuTakeTurn(now) {
   if (state !== "CPU_TURN") return;
   if (!cpu.alive || !player.alive) return;
@@ -582,6 +609,55 @@ document.getElementById("restartBtn").addEventListener("click", resetGame);
           ctx.fillRect(x*TILE+10+i*10, y*TILE+10, 6, 6);
         }
       }
+    }
+
+    // shot preview (during player turn)
+    if (state === "PLAYER_TURN" && player.alive) {
+      const shotPath = computeShotPath(player);
+
+      // draw dashed line from turret along path
+      ctx.strokeStyle = "rgba(200, 200, 100, 0.5)";
+      ctx.lineWidth = 2;
+      ctx.setLineDash([4, 4]);
+
+      const td = DIR8[player.turret];
+      const n = normalized(td.dx, td.dy);
+      const startX = player.x * TILE + TILE / 2;
+      const startY = player.y * TILE + TILE / 2;
+
+      if (shotPath.targetX !== null) {
+        const endX = shotPath.targetX * TILE + TILE / 2;
+        const endY = shotPath.targetY * TILE + TILE / 2;
+        ctx.beginPath();
+        ctx.moveTo(startX, startY);
+        ctx.lineTo(endX, endY);
+        ctx.stroke();
+
+        // draw impact marker
+        ctx.setLineDash([]);
+        if (shotPath.hitType === 'tank') {
+          ctx.strokeStyle = "rgba(255, 0, 0, 0.7)";
+          ctx.lineWidth = 3;
+          ctx.strokeRect(shotPath.targetX*TILE+10, shotPath.targetY*TILE+10, TILE-20, TILE-20);
+        } else if (shotPath.hitType === 'obstacle') {
+          ctx.strokeStyle = "rgba(255, 150, 0, 0.7)";
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.arc(shotPath.targetX*TILE + TILE/2, shotPath.targetY*TILE + TILE/2, 20, 0, Math.PI * 2);
+          ctx.stroke();
+        }
+      } else {
+        // miss - draw full path off-board
+        const lastCell = shotPath.cells[shotPath.cells.length - 1];
+        const endX = lastCell.x * TILE + TILE / 2 + n.dx * TILE * 2;
+        const endY = lastCell.y * TILE + TILE / 2 + n.dy * TILE * 2;
+        ctx.beginPath();
+        ctx.moveTo(startX, startY);
+        ctx.lineTo(endX, endY);
+        ctx.stroke();
+      }
+
+      ctx.setLineDash([]);
     }
 
     // animated missile
