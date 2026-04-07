@@ -699,6 +699,10 @@ document.getElementById("restartBtn").addEventListener("click", resetGame);
   function draw(now) {
     ctx.clearRect(0,0,canvas.width,canvas.height);
 
+    // Ensure player rx/ry are initialized
+    if (typeof player.rx === 'undefined') player.rx = player.x;
+    if (typeof player.ry === 'undefined') player.ry = player.y;
+
     // Save context state for screen shake
     ctx.save();
 
@@ -845,7 +849,7 @@ document.getElementById("restartBtn").addEventListener("click", resetGame);
         ctx.beginPath();
         ctx.arc(endX, endY, 3, 0, Math.PI * 2);
         ctx.stroke();
-      } else {
+      } else if (shotPath.cells && shotPath.cells.length > 0) {
         // miss - draw full path off-board
         const lastCell = shotPath.cells[shotPath.cells.length - 1];
         const endX = lastCell.x * TILE + TILE / 2 + n.dx * TILE * 2;
@@ -985,19 +989,31 @@ document.getElementById("restartBtn").addEventListener("click", resetGame);
     }
 
     // Update player movement animation
-    if (playerAnim && now - playerAnim.start < PLAYER_MOVE_MS) {
-      const t = Math.min(1, (now - playerAnim.start) / PLAYER_MOVE_MS);
-      player.rx = lerp(playerAnim.fromX, playerAnim.toX, t);
-      player.ry = lerp(playerAnim.fromY, playerAnim.toY, t);
-    } else if (playerAnim) {
-      // Animation finished, snap to final position
-      player.rx = player.x;
-      player.ry = player.y;
-      playerAnim = null;
+    if (playerAnim) {
+      try {
+        const elapsed = now - playerAnim.start;
+        if (elapsed < PLAYER_MOVE_MS) {
+          const t = Math.min(1, elapsed / PLAYER_MOVE_MS);
+          player.rx = lerp(playerAnim.fromX, playerAnim.toX, t);
+          player.ry = lerp(playerAnim.fromY, playerAnim.toY, t);
+        } else {
+          // Animation finished, snap to final position
+          player.rx = player.x;
+          player.ry = player.y;
+          playerAnim = null;
+        }
+      } catch (e) {
+        console.error("Player animation error:", e);
+        playerAnim = null;
+      }
     }
 
-    drawTank(player);
-    drawTank(cpu);
+    try {
+      drawTank(player);
+      drawTank(cpu);
+    } catch (e) {
+      console.error("drawTank error:", e);
+    }
 
     // draw explosions
     const EXPLOSION_DURATION = 800;
