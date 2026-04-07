@@ -500,6 +500,8 @@ window.addEventListener("keydown", (e) => {
   e.preventDefault();
 });
 
+document.getElementById("restartBtn").addEventListener("click", resetGame);
+
   // --- Rendering ---
   function draw(now) {
     ctx.clearRect(0,0,canvas.width,canvas.height);
@@ -587,8 +589,8 @@ window.addEventListener("keydown", (e) => {
       `<div><b>Moves left:</b> ${movesLeft}</div>` +
       `<div><b>Player hull/turret:</b> ${DIR4_NAMES[player.facing]} / ${DIR8_NAMES[player.turret]}</div>` +
       `<div><b>CPU hull/turret:</b> ${DIR4_NAMES[cpu.facing]} / ${DIR8_NAMES[cpu.turret]}</div>` +
-      `<div style="margin-top:8px;"><b>Status:</b> ${message}</div>`;
-      `<div class="muted" style=>Version ${GAME_VERSION}</div>`;
+      `<div style="margin-top:8px;"><b>Status:</b> ${message}</div>` +
+      `<div class="muted" style="margin-top:6px;">Version ${GAME_VERSION}</div>`;
 
     
     if (state === "CPU_TURN" && cpu.alive && player.alive) {
