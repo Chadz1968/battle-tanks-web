@@ -531,6 +531,11 @@ const cpu    = { x:8, y:8, rx:8, ry:8, facing:3, turret:6, alive:true, hp:3, col
   if (state !== "CPU_TURN") return;
   if (!cpu.alive || !player.alive) return;
 
+  // Wait for missile animation to finish before proceeding
+  if (missileAnim && now - missileAnim.startTime < missileAnim.duration) {
+    return;
+  }
+
   // Build plan once at start of CPU turn
   if (!cpuPlan) {
     message = "CPU thinking...";
