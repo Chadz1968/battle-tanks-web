@@ -406,6 +406,9 @@ const cpu    = { x:8, y:8, rx:8, ry:8, facing:3, turret:6, alive:true, hp:3, col
           // Spawn debris particles
           const cx = x * TILE + TILE / 2;
           const cy = y * TILE + TILE / 2;
+          const tetroIndex = ob[y][x].tetromino;
+          const debrisColor = (tetroIndex >= 0 && tetroIndex < TETRO_COLORS.length) ? TETRO_COLORS[tetroIndex] : "#ffffff";
+
           for (let i = 0; i < 7; i++) {
             const angle = (i / 7) * Math.PI * 2;
             const speed = 2 + Math.random() * 1.5;
@@ -415,7 +418,7 @@ const cpu    = { x:8, y:8, rx:8, ry:8, facing:3, turret:6, alive:true, hp:3, col
               vx: Math.cos(angle) * speed,
               vy: Math.sin(angle) * speed,
               startTime: now,
-              color: TETRO_COLORS[ob[y][x].tetromino]
+              color: debrisColor
             });
           }
           ob[y][x] = null;
@@ -990,19 +993,24 @@ document.getElementById("restartBtn").addEventListener("click", resetGame);
     const DEBRIS_DURATION = 600;
     debris = debris.filter(d => now - d.startTime < DEBRIS_DURATION);
     for (const d of debris) {
-      const age = now - d.startTime;
-      const progress = age / DEBRIS_DURATION;
-      const px = d.x + d.vx * age * 0.1;
-      const py = d.y + d.vy * age * 0.1;
-      const size = 4 * (1 - progress);
+      try {
+        const age = now - d.startTime;
+        const progress = age / DEBRIS_DURATION;
+        const px = d.x + d.vx * age * 0.1;
+        const py = d.y + d.vy * age * 0.1;
+        const size = 4 * (1 - progress);
 
-      // Convert hex color to rgba with fading opacity
-      const hexColor = d.color;
-      const r = parseInt(hexColor.substr(1,2), 16);
-      const g = parseInt(hexColor.substr(3,2), 16);
-      const b = parseInt(hexColor.substr(5,2), 16);
-      ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${(1 - progress) * 0.8})`;
-      ctx.fillRect(px - size/2, py - size/2, size, size);
+        // Safely parse color
+        if (d.color && d.color.startsWith('#') && d.color.length === 7) {
+          const r = parseInt(d.color.substr(1,2), 16);
+          const g = parseInt(d.color.substr(3,2), 16);
+          const b = parseInt(d.color.substr(5,2), 16);
+          ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${(1 - progress) * 0.8})`;
+          ctx.fillRect(px - size/2, py - size/2, size, size);
+        }
+      } catch (e) {
+        // Silently skip invalid debris
+      }
     }
 
     const turnName = (state==="PLAYER_TURN") ? "PLAYER" : (state==="CPU_TURN" ? "CPU" : "GAME OVER");
