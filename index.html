@@ -5,7 +5,7 @@
   <title>Tank Battle (10x10 Turn-Based Prototype)</title>
   <style>
     body { background:#111; color:#eee; font-family:system-ui,Segoe UI,Arial; display:flex; gap:16px; padding:16px; }
-    canvas { background:#0b0f14; border:1px solid #2a2f3a; }
+    canvas { background:#d0d0d0; border:1px solid #2a2f3a; }
     .panel { max-width:360px; line-height:1.35; }
     .kbd { padding:2px 6px; border:1px solid #444; border-radius:6px; background:#1a1f2a; }
     .muted { color:#aab; }
@@ -16,7 +16,8 @@
   <div class="panel">
     <h2 style="margin:0 0 8px 0;">Tank Battle (Prototype)</h2>
     <div id="hud" class="muted"></div>
-    <hr style="border:0;border-top:1px solid #2a2f3a;margin:12px 0;">
+  <button id="restartBtn" style="margin-top:12px">Restart</button>
+  <hr style="border:0;border-top:1px solid #2a2f3a;margin:12px 0;">
     <div>
       <div><span class="kbd">W</span>/<span class="kbd">S</span> move forward/back (costs moves)</div>
       <div><span class="kbd">A</span>/<span class="kbd">D</span> rotate hull (free)</div>
@@ -31,14 +32,82 @@
 
 <script>
 (() => {
+  const GAME_VERSION = "v0.5 - 08/04/2026";
   const canvas = document.getElementById("c");
   const ctx = canvas.getContext("2d");
   const hud = document.getElementById("hud");
+
+  // Create audio element for firing sound
+  const fireSound = new Audio("https://raw.githubusercontent.com/Chadz1968/battle-tanks-web/main/battle_tank_fire.mp3");
+  fireSound.volume = 0.5;
+
+  // Create audio element for explosion sound
+  const explosionSound = new Audio("https://raw.githubusercontent.com/Chadz1968/battle-tanks-web/main/battle_tank_exploding.mp3");
+  explosionSound.volume = 0.6;
+
+  // Create audio element for obstacle hit sound
+  const obstacleHitSound = new Audio("https://raw.githubusercontent.com/Chadz1968/battle-tanks-web/main/battle_tank_obstacle_hit.mp3");
+  obstacleHitSound.volume = 0.5;
+
+  // Create audio element for engine sound (looping)
+  const engineSound = new Audio("https://raw.githubusercontent.com/Chadz1968/battle-tanks-web/main/battle_tank_engine.mp3");
+  engineSound.volume = 0.4;
+  engineSound.loop = true;
 
   const GRID = 10;
   const TILE = 64;
   const OB_HP_MAX = 3;
   const MOVE_MAX = 5;
+
+function resetGame() {
+  // Stop all sounds
+  engineSound.pause();
+
+  // Reset board
+  for (let y = 0; y < GRID; y++) {
+    for (let x = 0; x < GRID; x++) {
+      ob[y][x] = null;
+    }
+  }
+
+  placeRandomObstacles(7);
+
+  // Reset player
+  player.x = 1;
+  player.y = 1;
+  player.rx = 1;
+  player.ry = 1;
+  player.facing = 1;
+  player.turret = 2;
+  player.alive = true;
+  player.hp = 3;
+
+  // Reset CPU
+  cpu.x = 8;
+  cpu.y = 8;
+  cpu.rx = 8;
+  cpu.ry = 8;
+  cpu.facing = 3;
+  cpu.turret = 6;
+  cpu.alive = true;
+  cpu.hp = 3;
+
+  // Reset turn state
+  state = "PLAYER_TURN";
+  movesLeft = MOVE_MAX;
+  lastShotTrace = [];
+  missileAnim = null;
+  playerAnim = null;
+  explosions = [];
+  debris = [];
+  shakeUntil = 0;
+  message = "Your turn.";
+
+  // Reset CPU animation / planning
+  cpuPlan = null;
+  cpuAnim = null;
+  cpuThinkingStart = null;
+}
 
   // Hull directions (90°): 0=N,1=E,2=S,3=W
 const DIR4 = [
@@ -63,15 +132,30 @@ const DIR8 = [
 const DIR4_NAMES = ["N","E","S","W"];
 const DIR8_NAMES = ["N","NE","E","SE","S","SW","W","NW"];
 
-// Board: obstacle HP per cell (0 means empty)
-const ob = Array.from({length:GRID}, () => Array(GRID).fill(0));
+// Tetromino colors (vibrant)
+const TETRO_COLORS = [
+  "#00ffff", // I - cyan
+  "#ffff00", // O - yellow
+  "#ff00ff", // T - magenta
+  "#00ff00", // S - lime green
+  "#ff0000", // Z - red
+  "#0099ff", // J - bright blue
+  "#ff8800", // L - orange
+];
 
-const player = { x:1, y:1, rx:1, ry:1, facing:1, turret:2, alive:true, color:"#55d6ff", name:"Player" };
-const cpu    = { x:8, y:8, rx:8, ry:8, facing:3, turret:6, alive:true, color:"#ff5b6b", name:"CPU" };
+// Board: obstacle per cell {hp, tetromino} or null
+const ob = Array.from({length:GRID}, () => Array(GRID).fill(null));
+
+const player = { x:1, y:1, rx:1, ry:1, facing:1, turret:2, alive:true, hp:3, color:"#55d6ff", name:"Player" };
+const cpu    = { x:8, y:8, rx:8, ry:8, facing:3, turret:6, alive:true, hp:3, color:"#ff5b6b", name:"CPU" };
 
   let state = "PLAYER_TURN"; // PLAYER_TURN | CPU_TURN | GAME_OVER
   let movesLeft = MOVE_MAX;
   let lastShotTrace = []; // cells bullet passed through (for quick visual feedback)
+  let missileAnim = null; // {cells, startTime, duration} - current missile animation
+  let explosions = []; // [{x, y, startTime}]
+  let debris = []; // [{x, y, vx, vy, startTime}] - flying debris particles
+  let shakeUntil = 0; // screen shake end time (time-based)
   let message = "Your turn.";
 
   // --- Tetromino definitions (4 blocks each) ---
@@ -94,7 +178,9 @@ const cpu    = { x:8, y:8, rx:8, ry:8, facing:3, turret:6, alive:true, color:"#f
   ];
 
   // CPU animation speed per tile (tweak this)
-  const CPU_STEP_MS = 160; 
+  const CPU_STEP_MS = 250;
+  const CPU_THINKING_MS = 300; // pause before CPU starts moving
+  const PLAYER_MOVE_MS = 200; // Player movement animation duration
   const lerp = (a,b,t) => a + (b-a)*t;
 
   // returns normalized vector (dx,dy) with length 1, or {0,0} if input is zero
@@ -108,6 +194,12 @@ const cpu    = { x:8, y:8, rx:8, ry:8, facing:3, turret:6, alive:true, color:"#f
 
   // { fromX,fromY,toX,toY,start,face }
   let cpuAnim = null;
+
+  // Player movement animation { fromX,fromY,toX,toY,start }
+  let playerAnim = null;
+
+  // timestamp when CPU started thinking (for pause before movement)
+  let cpuThinkingStart = null;
 
   function buildCpuPlan() {
   // reset per-turn movement budget
@@ -148,7 +240,7 @@ const cpu    = { x:8, y:8, rx:8, ry:8, facing:3, turret:6, alive:true, color:"#f
 
       for (let dir=0; dir<4; dir++) {
         const nx = x + DIR4[dir].dx, ny = y + DIR4[dir].dy; // IMPORTANT: DIR4 not DIRS
-        if (inBounds(nx,ny) && ob[ny][nx] > 0) coverAdj++;
+        if (inBounds(nx,ny) && ob[ny][nx] !== null) coverAdj++;
       }
 
       const score = man - coverAdj*0.75 + d*0.15;
@@ -165,9 +257,9 @@ const cpu    = { x:8, y:8, rx:8, ry:8, facing:3, turret:6, alive:true, color:"#f
 
   // Convert path into step list with facing
   const steps = path.slice(0, MOVE_MAX).map(step => {
-    const dx = step.x - cpu.x;
-    const dy = step.y - cpu.y;
-    // NOTE: dx/dy here is relative to ORIGINAL cpu; we’ll compute face later per step
+  const dx = step.x - cpu.x;
+  const dy = step.y - cpu.y;
+  // NOTE: dx/dy here is relative to ORIGINAL cpu; we’ll compute face later per step
     return {x: step.x, y: step.y};
   });
 
@@ -194,7 +286,7 @@ const cpu    = { x:8, y:8, rx:8, ry:8, facing:3, turret:6, alive:true, color:"#f
     return (player.alive && player.x===x && player.y===y) || (cpu.alive && cpu.x===x && cpu.y===y);
   }
   function isOccupied(x,y){
-    return !inBounds(x,y) || ob[y][x]>0 || isTankAt(x,y);
+    return !inBounds(x,y) || ob[y][x]!==null || isTankAt(x,y);
   }
 
   function placeRandomObstacles(count=6) {
@@ -202,7 +294,8 @@ const cpu    = { x:8, y:8, rx:8, ry:8, facing:3, turret:6, alive:true, color:"#f
     let placed = 0;
     while (placed < count && tries < 2000) {
       tries++;
-      const base = TETROS[Math.floor(Math.random()*TETROS.length)];
+      const tetroIndex = Math.floor(Math.random()*TETROS.length);
+      const base = TETROS[tetroIndex];
       const r = Math.floor(Math.random()*4);
       const shape = rotated(base, r);
       const ax = Math.floor(Math.random()*GRID);
@@ -213,14 +306,14 @@ const cpu    = { x:8, y:8, rx:8, ry:8, facing:3, turret:6, alive:true, color:"#f
       for (const p of shape) {
         const x = ax + p.x, y = ay + p.y;
         if (!inBounds(x,y)) { ok=false; break; }
-        if (ob[y][x]>0) { ok=false; break; }
+        if (ob[y][x]!==null) { ok=false; break; }
         if ((x===player.x && y===player.y) || (x===cpu.x && y===cpu.y)) { ok=false; break; }
       }
       if (!ok) continue;
 
       for (const p of shape) {
         const x = ax + p.x, y = ay + p.y;
-        ob[y][x] = OB_HP_MAX;
+        ob[y][x] = {hp: OB_HP_MAX, tetromino: tetroIndex};
       }
       placed++;
     }
@@ -234,7 +327,7 @@ const cpu    = { x:8, y:8, rx:8, ry:8, facing:3, turret:6, alive:true, color:"#f
     tank.turret = (tank.turret + dirDelta + 8) % 8;
   }
 
-  function tryMove(tank, forward=true) {
+  function tryMove(tank, forward=true, now=null) {
     if (movesLeft <= 0) return false;
     const d = DIR4[tank.facing];
     const dx = forward ? d.dx : -d.dx;
@@ -242,39 +335,117 @@ const cpu    = { x:8, y:8, rx:8, ry:8, facing:3, turret:6, alive:true, color:"#f
     const nx = tank.x + dx;
     const ny = tank.y + dy;
     if (!inBounds(nx,ny)) return false;
-    if (ob[ny][nx] > 0) return false;
+    if (ob[ny][nx] !== null) return false;
     if (isTankAt(nx,ny)) return false;
-    tank.x = nx; tank.y = ny;
-    tank.rx = tank.x; tank.ry = tank.y;
+
+    // Set up movement animation for player tank
+    if (tank === player && now !== null) {
+      playerAnim = {
+        fromX: tank.x,
+        fromY: tank.y,
+        toX: nx,
+        toY: ny,
+        start: now
+      };
+    } else {
+      // Snap movement for non-player tanks (shouldn't happen in current code)
+      tank.x = nx;
+      tank.y = ny;
+      tank.rx = tank.x;
+      tank.ry = tank.y;
+    }
+
+    tank.x = nx;
+    tank.y = ny;
     movesLeft--;
+
+    // Play engine sound for both player and CPU
+    if (engineSound.paused) {
+      engineSound.currentTime = 0;
+      engineSound.play().catch(() => {});
+    }
+
     return true;
   }
 
   // --- Shooting ---
-  function shoot(fromTank) {
+  function shoot(fromTank, now) {
+    // Play fire sound
+    fireSound.currentTime = 0;
+    fireSound.play().catch(() => {}); // ignore if audio fails to play
+
     lastShotTrace = [];
+    missileAnim = null;
     const d = DIR8[fromTank.turret];
     let x = fromTank.x + d.dx;
     let y = fromTank.y + d.dy;
+    const cells = [];
 
     while (inBounds(x,y)) {
-      lastShotTrace.push({x,y});
+      cells.push({x,y,turret:fromTank.turret});
 
       // hit other tank?
       const target = (fromTank === player) ? cpu : player;
       if (target.alive && target.x===x && target.y===y) {
-        target.alive = false;
-        state = "GAME_OVER";
-        message = `${fromTank.name} wins! Direct hit.`;
+        target.hp--;
+        shakeUntil = now + 250; // trigger screen shake for 250ms
+        const isKilled = target.hp <= 0;
+        if (isKilled) {
+          target.alive = false;
+          state = "GAME_OVER";
+          message = `${fromTank.name} wins! Direct hit!`;
+        } else {
+          message = `${fromTank.name} hit ${target.name}! (${target.hp} HP left)`;
+        }
+        lastShotTrace = cells;
+        if (cells.length > 0) {
+          missileAnim = {
+            cells,
+            startTime: now,
+            duration: cells.length * 60,
+            explosionEvent: isKilled ? {x: target.x, y: target.y, sound: 'explosion'} : null
+          };
+        }
         return;
       }
 
       // hit obstacle?
-      if (ob[y][x] > 0) {
-        ob[y][x]--;
-        message = (ob[y][x]===0)
+      if (ob[y][x] !== null) {
+        ob[y][x].hp--;
+        shakeUntil = now + 150; // trigger screen shake for 150ms
+        message = (ob[y][x].hp===0)
           ? "Shot destroyed an obstacle tile (hole created)."
           : "Shot damaged an obstacle tile.";
+        lastShotTrace = cells;
+        if (cells.length > 0) {
+          missileAnim = {
+            cells,
+            startTime: now,
+            duration: cells.length * 60,
+            explosionEvent: {x: x, y: y, sound: 'obstacle'}
+          };
+        }
+        if (ob[y][x].hp <= 0) {
+          // Spawn debris particles
+          const cx = x * TILE + TILE / 2;
+          const cy = y * TILE + TILE / 2;
+          const tetroIndex = ob[y][x].tetromino;
+          const debrisColor = (tetroIndex >= 0 && tetroIndex < TETRO_COLORS.length) ? TETRO_COLORS[tetroIndex] : "#ffffff";
+
+          for (let i = 0; i < 7; i++) {
+            const angle = (i / 7) * Math.PI * 2;
+            const speed = 0.5 + Math.random() * 0.4; // Slow motion - reduced from 2-3.5 to 0.5-0.9
+            debris.push({
+              x: cx,
+              y: cy,
+              vx: Math.cos(angle) * speed,
+              vy: Math.sin(angle) * speed,
+              startTime: now,
+              color: debrisColor
+            });
+          }
+          ob[y][x] = null;
+        }
         return;
       }
 
@@ -282,6 +453,10 @@ const cpu    = { x:8, y:8, rx:8, ry:8, facing:3, turret:6, alive:true, color:"#f
       y += d.dy;
     }
     message = "Shot missed (left the battlefield).";
+    lastShotTrace = cells;
+    if (cells.length > 0) {
+      missileAnim = { cells, startTime: now, duration: cells.length * 60 };
+    }
   }
 
   // --- CPU AI ---
@@ -297,7 +472,7 @@ const cpu    = { x:8, y:8, rx:8, ry:8, facing:3, turret:6, alive:true, color:"#f
         const nx = cur.x + DIR4[dir].dx;
         const ny = cur.y + DIR4[dir].dy;
         if (!inBounds(nx,ny)) continue;
-        if (ob[ny][nx] > 0) continue;
+        if (ob[ny][nx] !== null) continue;
         if (isTankAt(nx,ny) && !(nx===startX && ny===startY)) continue;
 
         const nk = key(nx,ny);
@@ -316,7 +491,7 @@ const cpu    = { x:8, y:8, rx:8, ry:8, facing:3, turret:6, alive:true, color:"#f
     let y = fromY + d.dy;
     while (inBounds(x,y)) {
       if (target.alive && target.x===x && target.y===y) return true;
-      if (ob[y][x] > 0) return false;
+      if (ob[y][x] !== null) return false;
       x += d.dx; y += d.dy;
     }
     return false;
@@ -327,7 +502,7 @@ const cpu    = { x:8, y:8, rx:8, ry:8, facing:3, turret:6, alive:true, color:"#f
     let x = fromX + d.dx;
     let y = fromY + d.dy;
     while (inBounds(x,y)) {
-      if (ob[y][x] > 0) return {x,y};
+      if (ob[y][x] !== null) return {x,y};
       if (player.alive && player.x===x && player.y===y) return null;
       x += d.dx; y += d.dy;
     }
@@ -348,19 +523,64 @@ const cpu    = { x:8, y:8, rx:8, ry:8, facing:3, turret:6, alive:true, color:"#f
     return out;
   }
 
+  function computeShotPath(fromTank) {
+    const d = DIR8[fromTank.turret];
+    let x = fromTank.x + d.dx;
+    let y = fromTank.y + d.dy;
+    const cells = [];
+
+    while (inBounds(x,y)) {
+      cells.push({x,y});
+
+      // stop at tank
+      const target = (fromTank === player) ? cpu : player;
+      if (target.alive && target.x===x && target.y===y) {
+        return {cells, hitType: 'tank', targetX: target.x, targetY: target.y};
+      }
+
+      // stop at obstacle
+      if (ob[y][x] !== null) {
+        return {cells, hitType: 'obstacle', targetX: x, targetY: y};
+      }
+
+      x += d.dx;
+      y += d.dy;
+    }
+
+    return {cells, hitType: 'miss', targetX: null, targetY: null};
+  }
+
   function cpuTakeTurn(now) {
   if (state !== "CPU_TURN") return;
   if (!cpu.alive || !player.alive) return;
+
+  // Wait for missile animation to finish before proceeding
+  if (missileAnim && now - missileAnim.startTime < missileAnim.duration) {
+    return;
+  }
 
   // Build plan once at start of CPU turn
   if (!cpuPlan) {
     message = "CPU thinking...";
     cpuPlan = buildCpuPlan();
-    message = "CPU moving...";
+    cpuThinkingStart = now;
+    return; // wait for thinking pause
+  }
+
+  // Wait for thinking pause before starting movement
+  if (now - cpuThinkingStart < CPU_THINKING_MS) {
+    message = "CPU thinking...";
+    return;
   }
 
   // If we’re currently animating a step, update interpolation
   if (cpuAnim) {
+    // Play engine sound while moving
+    if (engineSound.paused) {
+      engineSound.currentTime = 0;
+      engineSound.play().catch(() => {});
+    }
+
     const t = Math.min(1, (now - cpuAnim.start) / CPU_STEP_MS);
     cpu.rx = lerp(cpuAnim.fromX, cpuAnim.toX, t);
     cpu.ry = lerp(cpuAnim.fromY, cpuAnim.toY, t);
@@ -402,16 +622,20 @@ const cpu    = { x:8, y:8, rx:8, ry:8, facing:3, turret:6, alive:true, color:"#f
   cpu.turret = cpuPlan.turret;
 
   if (rayHitsTank(cpu.x, cpu.y, cpu.turret, player)) {
-    shoot(cpu);
+    shoot(cpu, now);
   } else {
     const block = rayFirstObstacle(cpu.x, cpu.y, cpu.turret);
-    if (block) shoot(cpu);
+    if (block) shoot(cpu, now);
     else message = "CPU ended turn.";
   }
 
   // cleanup and pass turn back
   cpuPlan = null;
   cpuAnim = null;
+  cpuThinkingStart = null;
+
+  // Stop engine sound
+  engineSound.pause();
 
   if (state !== "GAME_OVER") {
     state = "PLAYER_TURN";
@@ -425,7 +649,9 @@ window.addEventListener("keydown", (e) => {
   if (state === "GAME_OVER") return;
   if (state !== "PLAYER_TURN") return; // lock input during CPU animation
 
-  lastShotTrace = [];
+  // Stop engine sound on any input during player turn (fresh start for next move)
+  engineSound.pause();
+  engineSound.currentTime = 0;
 
   const k = e.key.toLowerCase();
   const isShift = (e.key === "Shift");
@@ -435,127 +661,438 @@ window.addEventListener("keydown", (e) => {
   else if (k === "q") rotateTurret(player, -1); // 45° steps now
   else if (k === "e") rotateTurret(player, +1);
   else if (k === "w") {
-    if (!tryMove(player, true)) message = "Blocked or no moves left.";
+    if (!tryMove(player, true, performance.now())) message = "Blocked or no moves left.";
   }
   else if (k === "s") {
-    if (!tryMove(player, false)) message = "Blocked or no moves left.";
+    if (!tryMove(player, false, performance.now())) message = "Blocked or no moves left.";
   }
   else if (e.code === "Space") {
-    shoot(player);
+    lastShotTrace = [];
+    engineSound.pause(); // Stop engine sound before shooting
+    engineSound.currentTime = 0;
+    shoot(player, performance.now());
     if (state !== "GAME_OVER") {
       state = "CPU_TURN";
       message = "CPU turn...";
       // reset CPU anim state so CPU starts planning from scratch
       cpuPlan = null;
       cpuAnim = null;
+      cpuThinkingStart = null;
     }
   }
   else if (isShift) {
+    engineSound.pause(); // Stop engine sound before ending turn
+    engineSound.currentTime = 0;
     state = "CPU_TURN";
     message = "CPU turn...";
     cpuPlan = null;
     cpuAnim = null;
+    cpuThinkingStart = null;
   }
 
   e.preventDefault();
 });
 
+document.getElementById("restartBtn").addEventListener("click", resetGame);
+
   // --- Rendering ---
   function draw(now) {
     ctx.clearRect(0,0,canvas.width,canvas.height);
 
+    // Ensure player rx/ry are initialized
+    if (typeof player.rx === 'undefined') player.rx = player.x;
+    if (typeof player.ry === 'undefined') player.ry = player.y;
+
+    // Save context state for screen shake
+    ctx.save();
+
+    // Apply screen shake
+    if (now < shakeUntil) {
+      const shake = 3;
+      ctx.translate(Math.random() * shake * 2 - shake, Math.random() * shake * 2 - shake);
+    }
+
+    // Draw background texture (subtle checkerboard)
+    for (let y = 0; y < GRID; y++) {
+      for (let x = 0; x < GRID; x++) {
+        if ((x + y) % 2 === 0) {
+          ctx.fillStyle = "#cbcbcb"; // slightly lighter
+        } else {
+          ctx.fillStyle = "#c5c5c5"; // slightly darker (3% difference)
+        }
+        ctx.fillRect(x * TILE, y * TILE, TILE, TILE);
+      }
+    }
+
     // grid
-    ctx.strokeStyle = "#1d2330";
+    ctx.strokeStyle = "#999999";
     for (let i=0;i<=GRID;i++){
       ctx.beginPath(); ctx.moveTo(i*TILE,0); ctx.lineTo(i*TILE,GRID*TILE); ctx.stroke();
       ctx.beginPath(); ctx.moveTo(0,i*TILE); ctx.lineTo(GRID*TILE,i*TILE); ctx.stroke();
     }
 
-    // obstacles
+    // obstacles with 3D effect
     for (let y=0;y<GRID;y++){
       for (let x=0;x<GRID;x++){
-        const hp = ob[y][x];
-        if (hp<=0) continue;
+        const obstacle = ob[y][x];
+        if (!obstacle) continue;
+        const hp = obstacle.hp;
+        const tetromino = obstacle.tetromino;
         const t = hp/OB_HP_MAX;
-        // darker when damaged
-        const col = `rgb(${Math.floor(90+60*t)},${Math.floor(120+50*t)},${Math.floor(90+60*t)})`;
-        ctx.fillStyle = col;
-        ctx.fillRect(x*TILE+6, y*TILE+6, TILE-12, TILE-12);
 
-        // HP pips
-        ctx.fillStyle = "#0b0f14";
-        for (let i=0;i<hp;i++){
-          ctx.fillRect(x*TILE+10+i*10, y*TILE+10, 6, 6);
+        // Get base color and darken based on HP
+        const baseColor = TETRO_COLORS[tetromino];
+        const r = Math.floor(parseInt(baseColor.substr(1,2), 16) * t);
+        const g = Math.floor(parseInt(baseColor.substr(3,2), 16) * t);
+        const b = Math.floor(parseInt(baseColor.substr(5,2), 16) * t);
+        const col = `rgb(${r},${g},${b})`;
+
+        const px = x * TILE + 6;
+        const py = y * TILE + 6;
+        const pw = TILE - 12;
+        const ph = TILE - 12;
+
+        // Main block fill
+        ctx.fillStyle = col;
+        ctx.fillRect(px, py, pw, ph);
+
+        // Lighter top-left bevel
+        ctx.fillStyle = `rgba(255, 255, 255, 0.3)`;
+        ctx.fillRect(px, py, pw - 2, 2);
+        ctx.fillRect(px, py, 2, ph - 2);
+
+        // Darker bottom-right bevel
+        ctx.fillStyle = `rgba(0, 0, 0, 0.4)`;
+        ctx.fillRect(px + 2, py + ph - 2, pw - 2, 2);
+        ctx.fillRect(px + pw - 2, py + 2, 2, ph - 2);
+
+        // Draw cracks based on HP
+        if (hp === 2) {
+          // One zigzag crack line
+          ctx.strokeStyle = "rgba(0, 0, 0, 0.5)";
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.moveTo(px + 4, py + ph - 4);
+          ctx.lineTo(px + pw * 0.25, py + ph * 0.75);
+          ctx.lineTo(px + pw * 0.5, py + ph * 0.5);
+          ctx.lineTo(px + pw * 0.75, py + ph * 0.25);
+          ctx.lineTo(px + pw - 4, py + 4);
+          ctx.stroke();
+        } else if (hp === 1) {
+          // Two zigzag cracks + desaturated color
+          ctx.strokeStyle = "rgba(0, 0, 0, 0.7)";
+          ctx.lineWidth = 1.5;
+          // Left crack
+          ctx.beginPath();
+          ctx.moveTo(px + 3, py + ph - 3);
+          ctx.lineTo(px + pw * 0.2, py + ph * 0.7);
+          ctx.lineTo(px + pw * 0.35, py + ph * 0.55);
+          ctx.lineTo(px + pw * 0.5, py + ph / 2);
+          ctx.stroke();
+          // Right crack
+          ctx.beginPath();
+          ctx.moveTo(px + pw - 3, py + 3);
+          ctx.lineTo(px + pw * 0.8, py + ph * 0.3);
+          ctx.lineTo(px + pw * 0.65, py + ph * 0.45);
+          ctx.lineTo(px + pw * 0.5, py + ph / 2);
+          ctx.stroke();
         }
       }
     }
 
-    // shot trace
-    for (const cell of lastShotTrace) {
-      ctx.fillStyle = "rgba(255,255,255,0.12)";
-      ctx.fillRect(cell.x*TILE+2, cell.y*TILE+2, TILE-4, TILE-4);
+    // shot preview (during player turn)
+    if (state === "PLAYER_TURN" && player.alive && player.turret >= 0 && player.turret < 8) {
+      const shotPath = computeShotPath(player);
+
+      // draw dashed line from turret along path
+      ctx.strokeStyle = "rgba(0, 0, 0, 0.4)";
+      ctx.lineWidth = 2;
+      ctx.setLineDash([6, 6]);
+
+      const td = DIR8[player.turret];
+      const n = normalized(td.dx, td.dy);
+      const startX = player.x * TILE + TILE / 2;
+      const startY = player.y * TILE + TILE / 2;
+
+      if (shotPath.targetX !== null) {
+        const endX = shotPath.targetX * TILE + TILE / 2;
+        const endY = shotPath.targetY * TILE + TILE / 2;
+        ctx.beginPath();
+        ctx.moveTo(startX, startY);
+        ctx.lineTo(endX, endY);
+        ctx.stroke();
+
+        // draw crosshair reticle at target
+        ctx.setLineDash([]);
+        ctx.strokeStyle = "rgba(0, 0, 0, 0.6)";
+        ctx.lineWidth = 1;
+        const reticleSize = 15;
+        // horizontal lines
+        ctx.beginPath();
+        ctx.moveTo(endX - reticleSize, endY);
+        ctx.lineTo(endX - 5, endY);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(endX + 5, endY);
+        ctx.lineTo(endX + reticleSize, endY);
+        ctx.stroke();
+        // vertical lines
+        ctx.beginPath();
+        ctx.moveTo(endX, endY - reticleSize);
+        ctx.lineTo(endX, endY - 5);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(endX, endY + 5);
+        ctx.lineTo(endX, endY + reticleSize);
+        ctx.stroke();
+        // center circle
+        ctx.beginPath();
+        ctx.arc(endX, endY, 3, 0, Math.PI * 2);
+        ctx.stroke();
+      } else if (shotPath.cells && shotPath.cells.length > 0) {
+        // miss - draw full path off-board
+        const lastCell = shotPath.cells[shotPath.cells.length - 1];
+        const endX = lastCell.x * TILE + TILE / 2 + n.dx * TILE * 2;
+        const endY = lastCell.y * TILE + TILE / 2 + n.dy * TILE * 2;
+        ctx.beginPath();
+        ctx.moveTo(startX, startY);
+        ctx.lineTo(endX, endY);
+        ctx.stroke();
+      }
+
+      ctx.setLineDash([]);
+    }
+
+    // animated missile
+    if (missileAnim && now - missileAnim.startTime < missileAnim.duration) {
+      const progress = (now - missileAnim.startTime) / missileAnim.duration;
+      const pathIndex = progress * (missileAnim.cells.length - 1);
+      const cellIndex = Math.floor(pathIndex);
+      const nextCellIndex = Math.min(cellIndex + 1, missileAnim.cells.length - 1);
+      const cellProgress = pathIndex - cellIndex;
+
+      const cell = missileAnim.cells[cellIndex];
+      const nextCell = missileAnim.cells[nextCellIndex];
+      const mx = cell.x + (nextCell.x - cell.x) * cellProgress;
+      const my = cell.y + (nextCell.y - cell.y) * cellProgress;
+
+      const cx = mx * TILE + TILE / 2;
+      const cy = my * TILE + TILE / 2;
+      const d = DIR8[cell.turret];
+      const n = normalized(d.dx, d.dy);
+
+      // draw glowing glow
+      ctx.fillStyle = "rgba(255,200,100,0.4)";
+      ctx.beginPath();
+      ctx.arc(cx, cy, 10, 0, Math.PI * 2);
+      ctx.fill();
+
+      // draw missile circle
+      ctx.fillStyle = "rgba(255,200,100,0.9)";
+      ctx.beginPath();
+      ctx.arc(cx, cy, 5, 0, Math.PI * 2);
+      ctx.fill();
+
+      // draw missile triangle pointing in direction
+      const len = 7;
+      const px = cx + n.dx * len;
+      const py = cy + n.dy * len;
+      const px2 = cx - n.dx * len * 0.5 - n.dy * len * 0.4;
+      const py2 = cy - n.dy * len * 0.5 + n.dx * len * 0.4;
+      const px3 = cx - n.dx * len * 0.5 + n.dy * len * 0.4;
+      const py3 = cy - n.dy * len * 0.5 - n.dx * len * 0.4;
+
+      ctx.fillStyle = "#ffdd00";
+      ctx.beginPath();
+      ctx.moveTo(px, py);
+      ctx.lineTo(px2, py2);
+      ctx.lineTo(px3, py3);
+      ctx.closePath();
+      ctx.fill();
+    } else {
+      // Missile animation finished - trigger explosion if one is scheduled
+      if (missileAnim && missileAnim.explosionEvent) {
+        const exp = missileAnim.explosionEvent;
+        explosions.push({x: exp.x, y: exp.y, startTime: now});
+        if (exp.sound === 'explosion') {
+          explosionSound.currentTime = 0;
+          explosionSound.play().catch(() => {});
+        } else if (exp.sound === 'obstacle') {
+          obstacleHitSound.currentTime = 0;
+          obstacleHitSound.play().catch(() => {});
+        }
+      }
+      missileAnim = null;
     }
 
     function drawTank(t) {
       if (!t.alive) return;
       const drawX = (t.rx ?? t.x);
       const drawY = (t.ry ?? t.y);
-
-      ctx.fillStyle = t.color;
-      ctx.fillRect(drawX*TILE+10, drawY*TILE+10, TILE-20, TILE-20);
-
       const cx = drawX*TILE + TILE/2;
       const cy = drawY*TILE + TILE/2;
 
-      // hull direction arrow
-      const fd = DIR4[t.facing];
-      ctx.strokeStyle = "#001018";
-      ctx.lineWidth = 4;
+      // Save context for rotation
+      ctx.save();
+      ctx.translate(cx, cy);
+
+      // Calculate hull rotation angle (DIR4: 0=N, 1=E, 2=S, 3=W)
+      const hullAngle = (t.facing * Math.PI) / 2;
+      ctx.rotate(hullAngle);
+
+      // Draw tracks (dark grey rectangles on left/right sides, protruding front/back)
+      ctx.fillStyle = "#1a1a1a";
+      ctx.fillRect(-20, -18, 6, 36);  // left track
+      ctx.fillRect(14, -18, 6, 36);   // right track
+
+      // Draw rounded hull in tank color
+      ctx.fillStyle = t.color;
+      if (ctx.roundRect) {
+        ctx.roundRect(-12, -16, 24, 32, 3);
+        ctx.fill();
+      } else {
+        // Fallback for browsers without roundRect
+        ctx.fillRect(-12, -16, 24, 32);
+      }
+
+      // Draw forward indicator stripe on the front of the hull
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(-4, -18, 8, 4);
+
+      // Draw turret (darker circle in center)
+      ctx.fillStyle = t.alive ? (t === player ? "#3a9fbf" : "#cc3f51") : "#444";
       ctx.beginPath();
-      ctx.moveTo(cx,cy);
-      ctx.lineTo(cx + fd.dx*18, cy + fd.dy*18);
-      ctx.stroke();
+      ctx.arc(0, 0, 10, 0, Math.PI * 2);
+      ctx.fill();
 
-      // turret direction line
-      const td = DIR8[t.turret];
-      const n = normalized(td.dx, td.dy);
-      const TURRET_LEN = 26;
+      ctx.restore();
 
-      ctx.strokeStyle = "#ffffff";
-      ctx.lineWidth = 3;
-      ctx.beginPath();
-      ctx.moveTo(cx, cy);
-      ctx.lineTo(
-        cx + n.dx * TURRET_LEN,
-        cy + n.dy * TURRET_LEN
-      );
-      ctx.stroke();
+      // Now draw barrel (rotated separately based on turret angle)
+      ctx.save();
+      ctx.translate(cx, cy);
 
-      // outline
-      ctx.strokeStyle = "rgba(255,255,255,0.35)";
-      ctx.lineWidth = 2;
-      ctx.strokeRect(t.x*TILE+10, t.y*TILE+10, TILE-20, TILE-20);
+      // Calculate turret rotation angle (DIR8: 45° steps)
+      const turretAngle = (t.turret * Math.PI) / 4;
+      ctx.rotate(turretAngle);
+
+      // Draw barrel
+      ctx.fillStyle = "#aaa";
+      ctx.fillRect(-2, -18, 4, 18);
+
+      ctx.restore();
+
+      // HP pips above tank
+      ctx.fillStyle = "#ffff00";
+      for (let i = 0; i < t.hp; i++) {
+        ctx.fillRect(drawX*TILE+10+i*10, drawY*TILE+2, 6, 6);
+      }
     }
 
-    drawTank(player);
-    drawTank(cpu);
+    // Update player movement animation
+    if (playerAnim) {
+      try {
+        const elapsed = now - playerAnim.start;
+        if (elapsed < PLAYER_MOVE_MS) {
+          const t = Math.min(1, elapsed / PLAYER_MOVE_MS);
+          player.rx = lerp(playerAnim.fromX, playerAnim.toX, t);
+          player.ry = lerp(playerAnim.fromY, playerAnim.toY, t);
+        } else {
+          // Animation finished, snap to final position
+          player.rx = player.x;
+          player.ry = player.y;
+          playerAnim = null;
+        }
+      } catch (e) {
+        console.error("Player animation error:", e);
+        playerAnim = null;
+      }
+    }
 
-    // HUD
+    try {
+      drawTank(player);
+      drawTank(cpu);
+    } catch (e) {
+      console.error("drawTank error:", e);
+    }
+
+    // draw explosions
+    const EXPLOSION_DURATION = 800;
+    explosions = explosions.filter(exp => now - exp.startTime < EXPLOSION_DURATION);
+    for (const exp of explosions) {
+      const age = now - exp.startTime;
+      const progress = age / EXPLOSION_DURATION;
+      const cx = exp.x * TILE + TILE / 2;
+      const cy = exp.y * TILE + TILE / 2;
+
+      // outer blast ring (grows and fades)
+      const ringRadius = 10 + progress * 25;
+      ctx.strokeStyle = `rgba(255, 100, 0, ${(1 - progress) * 0.8})`;
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(cx, cy, ringRadius, 0, Math.PI * 2);
+      ctx.stroke();
+
+      // explosion core (yellow, shrinking)
+      const coreRadius = 15 * (1 - progress);
+      ctx.fillStyle = `rgba(255, 200, 0, ${(1 - progress) * 0.9})`;
+      ctx.beginPath();
+      ctx.arc(cx, cy, coreRadius, 0, Math.PI * 2);
+      ctx.fill();
+
+      // red/orange sparks
+      ctx.fillStyle = `rgba(255, 80, 0, ${(1 - progress) * 0.7})`;
+      for (let i = 0; i < 8; i++) {
+        const angle = (i / 8) * Math.PI * 2;
+        const sparkDist = 15 + progress * 30;
+        const sx = cx + Math.cos(angle) * sparkDist;
+        const sy = cy + Math.sin(angle) * sparkDist;
+        const sparkSize = 3 * (1 - progress);
+        ctx.beginPath();
+        ctx.arc(sx, sy, Math.max(0.5, sparkSize), 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+    // Draw debris particles
+    const DEBRIS_DURATION = 1200; // Extended duration for slow-motion effect
+    debris = debris.filter(d => now - d.startTime < DEBRIS_DURATION);
+    for (const d of debris) {
+      try {
+        const age = now - d.startTime;
+        const progress = age / DEBRIS_DURATION;
+        const px = d.x + d.vx * age * 0.05; // Reduced multiplier for slower movement
+        const py = d.y + d.vy * age * 0.05;
+        const size = 4 * (1 - progress);
+
+        // Safely parse color
+        if (d.color && d.color.startsWith('#') && d.color.length === 7) {
+          const r = parseInt(d.color.substr(1,2), 16);
+          const g = parseInt(d.color.substr(3,2), 16);
+          const b = parseInt(d.color.substr(5,2), 16);
+          ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${(1 - progress) * 0.8})`;
+          ctx.fillRect(px - size/2, py - size/2, size, size);
+        }
+      } catch (e) {
+        // Silently skip invalid debris
+      }
+    }
+
     const turnName = (state==="PLAYER_TURN") ? "PLAYER" : (state==="CPU_TURN" ? "CPU" : "GAME OVER");
     hud.innerHTML =
       `<div><b>Turn:</b> ${turnName}</div>` +
       `<div><b>Moves left:</b> ${movesLeft}</div>` +
-      `<div><b>Player hull/turret:</b> ${DIR4_NAMES[player.facing]} / ${DIR8_NAMES[player.turret]}</div>` +
-      `<div><b>CPU hull/turret:</b> ${DIR4_NAMES[cpu.facing]} / ${DIR8_NAMES[cpu.turret]}</div>` +
-      `<div style="margin-top:8px;"><b>Status:</b> ${message}</div>`;
+      `<div><b>Player:</b> ${DIR4_NAMES[player.facing]} / ${DIR8_NAMES[player.turret]} | HP: ${player.hp}</div>` +
+      `<div><b>CPU:</b> ${DIR4_NAMES[cpu.facing]} / ${DIR8_NAMES[cpu.turret]} | HP: ${cpu.hp}</div>` +
+      `<div style="margin-top:8px;"><b>Status:</b> ${message}</div>` +
+      `<div class="muted" style="margin-top:6px;">Version ${GAME_VERSION}</div>`;
 
-    
     if (state === "CPU_TURN" && cpu.alive && player.alive) {
-    cpuTakeTurn(now);
-}
+      cpuTakeTurn(now);
+    }
 
+    ctx.restore(); // Restore context after screen shake
 
-      requestAnimationFrame(draw);
+    requestAnimationFrame(draw);
   }
 
   // --- Init ---
