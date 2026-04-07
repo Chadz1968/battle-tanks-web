@@ -37,6 +37,18 @@
   const ctx = canvas.getContext("2d");
   const hud = document.getElementById("hud");
 
+  // Create audio element for firing sound
+  const fireSound = new Audio("https://raw.githubusercontent.com/Chadz1968/battle-tanks-web/main/battle_tank_fire.mp3");
+  fireSound.volume = 0.5;
+
+  // Create audio element for explosion sound
+  const explosionSound = new Audio("https://raw.githubusercontent.com/Chadz1968/battle-tanks-web/main/battle_tank_exploding.mp3");
+  explosionSound.volume = 0.6;
+
+  // Create audio element for obstacle hit sound
+  const obstacleHitSound = new Audio("https://raw.githubusercontent.com/Chadz1968/battle-tanks-web/main/battle_tank_obstacle_hit.mp3");
+  obstacleHitSound.volume = 0.5;
+
   const GRID = 10;
   const TILE = 64;
   const OB_HP_MAX = 3;
@@ -74,6 +86,8 @@ function resetGame() {
   state = "PLAYER_TURN";
   movesLeft = MOVE_MAX;
   lastShotTrace = [];
+  missileAnim = null;
+  explosions = [];
   message = "Your turn.";
 
   // Reset CPU animation / planning
@@ -113,6 +127,8 @@ const cpu    = { x:8, y:8, rx:8, ry:8, facing:3, turret:6, alive:true, color:"#f
   let state = "PLAYER_TURN"; // PLAYER_TURN | CPU_TURN | GAME_OVER
   let movesLeft = MOVE_MAX;
   let lastShotTrace = []; // cells bullet passed through (for quick visual feedback)
+  let missileAnim = null; // {cells, startTime, duration} - current missile animation
+  let explosions = []; // [{x, y, startTime}]
   let message = "Your turn.";
 
   // --- Tetromino definitions (4 blocks each) ---
@@ -292,14 +308,20 @@ const cpu    = { x:8, y:8, rx:8, ry:8, facing:3, turret:6, alive:true, color:"#f
   }
 
   // --- Shooting ---
-  function shoot(fromTank) {
+  function shoot(fromTank, now) {
+    // Play fire sound
+    fireSound.currentTime = 0;
+    fireSound.play().catch(() => {}); // ignore if audio fails to play
+
     lastShotTrace = [];
+    missileAnim = null;
     const d = DIR8[fromTank.turret];
     let x = fromTank.x + d.dx;
     let y = fromTank.y + d.dy;
+    const cells = [];
 
     while (inBounds(x,y)) {
-      lastShotTrace.push({x,y});
+      cells.push({x,y,turret:fromTank.turret});
 
       // hit other tank?
       const target = (fromTank === player) ? cpu : player;
@@ -307,6 +329,15 @@ const cpu    = { x:8, y:8, rx:8, ry:8, facing:3, turret:6, alive:true, color:"#f
         target.alive = false;
         state = "GAME_OVER";
         message = `${fromTank.name} wins! Direct hit.`;
+        lastShotTrace = cells;
+        if (cells.length > 0) {
+          missileAnim = {
+            cells,
+            startTime: now,
+            duration: cells.length * 60,
+            explosionEvent: {x: target.x, y: target.y, sound: 'explosion'}
+          };
+        }
         return;
       }
 
@@ -316,6 +347,15 @@ const cpu    = { x:8, y:8, rx:8, ry:8, facing:3, turret:6, alive:true, color:"#f
         message = (ob[y][x]===0)
           ? "Shot destroyed an obstacle tile (hole created)."
           : "Shot damaged an obstacle tile.";
+        lastShotTrace = cells;
+        if (cells.length > 0) {
+          missileAnim = {
+            cells,
+            startTime: now,
+            duration: cells.length * 60,
+            explosionEvent: {x: x, y: y, sound: 'obstacle'}
+          };
+        }
         return;
       }
 
@@ -323,6 +363,10 @@ const cpu    = { x:8, y:8, rx:8, ry:8, facing:3, turret:6, alive:true, color:"#f
       y += d.dy;
     }
     message = "Shot missed (left the battlefield).";
+    lastShotTrace = cells;
+    if (cells.length > 0) {
+      missileAnim = { cells, startTime: now, duration: cells.length * 60 };
+    }
   }
 
   // --- CPU AI ---
@@ -443,10 +487,10 @@ const cpu    = { x:8, y:8, rx:8, ry:8, facing:3, turret:6, alive:true, color:"#f
   cpu.turret = cpuPlan.turret;
 
   if (rayHitsTank(cpu.x, cpu.y, cpu.turret, player)) {
-    shoot(cpu);
+    shoot(cpu, now);
   } else {
     const block = rayFirstObstacle(cpu.x, cpu.y, cpu.turret);
-    if (block) shoot(cpu);
+    if (block) shoot(cpu, now);
     else message = "CPU ended turn.";
   }
 
@@ -481,7 +525,7 @@ window.addEventListener("keydown", (e) => {
   }
   else if (e.code === "Space") {
     lastShotTrace = [];
-    shoot(player);
+    shoot(player, performance.now());
     if (state !== "GAME_OVER") {
       state = "CPU_TURN";
       message = "CPU turn...";
@@ -532,10 +576,66 @@ document.getElementById("restartBtn").addEventListener("click", resetGame);
       }
     }
 
-    // shot trace
-    for (const cell of lastShotTrace) {
-      ctx.fillStyle = "rgba(255,255,100,0.35)";
-      ctx.fillRect(cell.x*TILE+2, cell.y*TILE+2, TILE-4, TILE-4);
+    // animated missile
+    if (missileAnim && now - missileAnim.startTime < missileAnim.duration) {
+      const progress = (now - missileAnim.startTime) / missileAnim.duration;
+      const pathIndex = progress * (missileAnim.cells.length - 1);
+      const cellIndex = Math.floor(pathIndex);
+      const nextCellIndex = Math.min(cellIndex + 1, missileAnim.cells.length - 1);
+      const cellProgress = pathIndex - cellIndex;
+
+      const cell = missileAnim.cells[cellIndex];
+      const nextCell = missileAnim.cells[nextCellIndex];
+      const mx = cell.x + (nextCell.x - cell.x) * cellProgress;
+      const my = cell.y + (nextCell.y - cell.y) * cellProgress;
+
+      const cx = mx * TILE + TILE / 2;
+      const cy = my * TILE + TILE / 2;
+      const d = DIR8[cell.turret];
+      const n = normalized(d.dx, d.dy);
+
+      // draw glowing glow
+      ctx.fillStyle = "rgba(255,200,100,0.4)";
+      ctx.beginPath();
+      ctx.arc(cx, cy, 10, 0, Math.PI * 2);
+      ctx.fill();
+
+      // draw missile circle
+      ctx.fillStyle = "rgba(255,200,100,0.9)";
+      ctx.beginPath();
+      ctx.arc(cx, cy, 5, 0, Math.PI * 2);
+      ctx.fill();
+
+      // draw missile triangle pointing in direction
+      const len = 7;
+      const px = cx + n.dx * len;
+      const py = cy + n.dy * len;
+      const px2 = cx - n.dx * len * 0.5 - n.dy * len * 0.4;
+      const py2 = cy - n.dy * len * 0.5 + n.dx * len * 0.4;
+      const px3 = cx - n.dx * len * 0.5 + n.dy * len * 0.4;
+      const py3 = cy - n.dy * len * 0.5 - n.dx * len * 0.4;
+
+      ctx.fillStyle = "#ffdd00";
+      ctx.beginPath();
+      ctx.moveTo(px, py);
+      ctx.lineTo(px2, py2);
+      ctx.lineTo(px3, py3);
+      ctx.closePath();
+      ctx.fill();
+    } else {
+      // Missile animation finished - trigger explosion if one is scheduled
+      if (missileAnim && missileAnim.explosionEvent) {
+        const exp = missileAnim.explosionEvent;
+        explosions.push({x: exp.x, y: exp.y, startTime: now});
+        if (exp.sound === 'explosion') {
+          explosionSound.currentTime = 0;
+          explosionSound.play().catch(() => {});
+        } else if (exp.sound === 'obstacle') {
+          obstacleHitSound.currentTime = 0;
+          obstacleHitSound.play().catch(() => {});
+        }
+      }
+      missileAnim = null;
     }
 
     function drawTank(t) {
@@ -582,7 +682,43 @@ document.getElementById("restartBtn").addEventListener("click", resetGame);
     drawTank(player);
     drawTank(cpu);
 
-    // HUD
+    // draw explosions
+    const EXPLOSION_DURATION = 800;
+    explosions = explosions.filter(exp => now - exp.startTime < EXPLOSION_DURATION);
+    for (const exp of explosions) {
+      const age = now - exp.startTime;
+      const progress = age / EXPLOSION_DURATION;
+      const cx = exp.x * TILE + TILE / 2;
+      const cy = exp.y * TILE + TILE / 2;
+
+      // outer blast ring (grows and fades)
+      const ringRadius = 10 + progress * 25;
+      ctx.strokeStyle = `rgba(255, 100, 0, ${(1 - progress) * 0.8})`;
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(cx, cy, ringRadius, 0, Math.PI * 2);
+      ctx.stroke();
+
+      // explosion core (yellow, shrinking)
+      const coreRadius = 15 * (1 - progress);
+      ctx.fillStyle = `rgba(255, 200, 0, ${(1 - progress) * 0.9})`;
+      ctx.beginPath();
+      ctx.arc(cx, cy, coreRadius, 0, Math.PI * 2);
+      ctx.fill();
+
+      // red/orange sparks
+      ctx.fillStyle = `rgba(255, 80, 0, ${(1 - progress) * 0.7})`;
+      for (let i = 0; i < 8; i++) {
+        const angle = (i / 8) * Math.PI * 2;
+        const sparkDist = 15 + progress * 30;
+        const sx = cx + Math.cos(angle) * sparkDist;
+        const sy = cy + Math.sin(angle) * sparkDist;
+        const sparkSize = 3 * (1 - progress);
+        ctx.beginPath();
+        ctx.arc(sx, sy, Math.max(0.5, sparkSize), 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
     const turnName = (state==="PLAYER_TURN") ? "PLAYER" : (state==="CPU_TURN" ? "CPU" : "GAME OVER");
     hud.innerHTML =
       `<div><b>Turn:</b> ${turnName}</div>` +
