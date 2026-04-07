@@ -16,7 +16,8 @@
   <div class="panel">
     <h2 style="margin:0 0 8px 0;">Tank Battle (Prototype)</h2>
     <div id="hud" class="muted"></div>
-    <hr style="border:0;border-top:1px solid #2a2f3a;margin:12px 0;">
+  <button id="restartBtn" style="margin-top:12px">Restart</button>
+  <hr style="border:0;border-top:1px solid #2a2f3a;margin:12px 0;">
     <div>
       <div><span class="kbd">W</span>/<span class="kbd">S</span> move forward/back (costs moves)</div>
       <div><span class="kbd">A</span>/<span class="kbd">D</span> rotate hull (free)</div>
@@ -40,6 +41,45 @@
   const TILE = 64;
   const OB_HP_MAX = 3;
   const MOVE_MAX = 5;
+
+function resetGame() {
+  // Reset board
+  for (let y = 0; y < GRID; y++) {
+    for (let x = 0; x < GRID; x++) {
+      ob[y][x] = 0;
+    }
+  }
+
+  placeRandomObstacles(7);
+
+  // Reset player
+  player.x = 1;
+  player.y = 1;
+  player.rx = 1;
+  player.ry = 1;
+  player.facing = 1;
+  player.turret = 2;
+  player.alive = true;
+
+  // Reset CPU
+  cpu.x = 8;
+  cpu.y = 8;
+  cpu.rx = 8;
+  cpu.ry = 8;
+  cpu.facing = 3;
+  cpu.turret = 6;
+  cpu.alive = true;
+
+  // Reset turn state
+  state = "PLAYER_TURN";
+  movesLeft = MOVE_MAX;
+  lastShotTrace = [];
+  message = "Your turn.";
+
+  // Reset CPU animation / planning
+  cpuPlan = null;
+  cpuAnim = null;
+}
 
   // Hull directions (90°): 0=N,1=E,2=S,3=W
 const DIR4 = [
@@ -166,9 +206,9 @@ const cpu    = { x:8, y:8, rx:8, ry:8, facing:3, turret:6, alive:true, color:"#f
 
   // Convert path into step list with facing
   const steps = path.slice(0, MOVE_MAX).map(step => {
-    const dx = step.x - cpu.x;
-    const dy = step.y - cpu.y;
-    // NOTE: dx/dy here is relative to ORIGINAL cpu; we’ll compute face later per step
+  const dx = step.x - cpu.x;
+  const dy = step.y - cpu.y;
+  // NOTE: dx/dy here is relative to ORIGINAL cpu; we’ll compute face later per step
     return {x: step.x, y: step.y};
   });
 
@@ -426,8 +466,6 @@ window.addEventListener("keydown", (e) => {
   if (state === "GAME_OVER") return;
   if (state !== "PLAYER_TURN") return; // lock input during CPU animation
 
-  lastShotTrace = [];
-
   const k = e.key.toLowerCase();
   const isShift = (e.key === "Shift");
 
@@ -442,6 +480,7 @@ window.addEventListener("keydown", (e) => {
     if (!tryMove(player, false)) message = "Blocked or no moves left.";
   }
   else if (e.code === "Space") {
+    lastShotTrace = [];
     shoot(player);
     if (state !== "GAME_OVER") {
       state = "CPU_TURN";
@@ -493,7 +532,7 @@ window.addEventListener("keydown", (e) => {
 
     // shot trace
     for (const cell of lastShotTrace) {
-      ctx.fillStyle = "rgba(255,255,255,0.12)";
+      ctx.fillStyle = "rgba(255,255,100,0.35)";
       ctx.fillRect(cell.x*TILE+2, cell.y*TILE+2, TILE-4, TILE-4);
     }
 
@@ -549,7 +588,7 @@ window.addEventListener("keydown", (e) => {
       `<div><b>Player hull/turret:</b> ${DIR4_NAMES[player.facing]} / ${DIR8_NAMES[player.turret]}</div>` +
       `<div><b>CPU hull/turret:</b> ${DIR4_NAMES[cpu.facing]} / ${DIR8_NAMES[cpu.turret]}</div>` +
       `<div style="margin-top:8px;"><b>Status:</b> ${message}</div>`;
-      `<div class="muted" style="margin-top:6px;">Version ${GAME_VERSION}</div>`;
+      `<div class="muted" style=>Version ${GAME_VERSION}</div>`;
 
     
     if (state === "CPU_TURN" && cpu.alive && player.alive) {
