@@ -5,7 +5,7 @@
   <title>Tank Battle (10x10 Turn-Based Prototype)</title>
   <style>
     body { background:#111; color:#eee; font-family:system-ui,Segoe UI,Arial; display:flex; gap:16px; padding:16px; }
-    canvas { background:#0b0f14; border:1px solid #2a2f3a; }
+    canvas { background:#d0d0d0; border:1px solid #2a2f3a; }
     .panel { max-width:360px; line-height:1.35; }
     .kbd { padding:2px 6px; border:1px solid #444; border-radius:6px; background:#1a1f2a; }
     .muted { color:#aab; }
@@ -601,7 +601,7 @@ document.getElementById("restartBtn").addEventListener("click", resetGame);
     ctx.clearRect(0,0,canvas.width,canvas.height);
 
     // grid
-    ctx.strokeStyle = "#1d2330";
+    ctx.strokeStyle = "#999999";
     for (let i=0;i<=GRID;i++){
       ctx.beginPath(); ctx.moveTo(i*TILE,0); ctx.lineTo(i*TILE,GRID*TILE); ctx.stroke();
       ctx.beginPath(); ctx.moveTo(0,i*TILE); ctx.lineTo(GRID*TILE,i*TILE); ctx.stroke();
@@ -631,9 +631,9 @@ document.getElementById("restartBtn").addEventListener("click", resetGame);
       const shotPath = computeShotPath(player);
 
       // draw dashed line from turret along path
-      ctx.strokeStyle = "rgba(200, 200, 100, 0.5)";
+      ctx.strokeStyle = "rgba(0, 0, 0, 0.4)";
       ctx.lineWidth = 2;
-      ctx.setLineDash([4, 4]);
+      ctx.setLineDash([6, 6]);
 
       const td = DIR8[player.turret];
       const n = normalized(td.dx, td.dy);
@@ -648,19 +648,33 @@ document.getElementById("restartBtn").addEventListener("click", resetGame);
         ctx.lineTo(endX, endY);
         ctx.stroke();
 
-        // draw impact marker
+        // draw crosshair reticle at target
         ctx.setLineDash([]);
-        if (shotPath.hitType === 'tank') {
-          ctx.strokeStyle = "rgba(255, 0, 0, 0.7)";
-          ctx.lineWidth = 3;
-          ctx.strokeRect(shotPath.targetX*TILE+10, shotPath.targetY*TILE+10, TILE-20, TILE-20);
-        } else if (shotPath.hitType === 'obstacle') {
-          ctx.strokeStyle = "rgba(255, 150, 0, 0.7)";
-          ctx.lineWidth = 2;
-          ctx.beginPath();
-          ctx.arc(shotPath.targetX*TILE + TILE/2, shotPath.targetY*TILE + TILE/2, 20, 0, Math.PI * 2);
-          ctx.stroke();
-        }
+        ctx.strokeStyle = "rgba(0, 0, 0, 0.6)";
+        ctx.lineWidth = 1;
+        const reticleSize = 15;
+        // horizontal lines
+        ctx.beginPath();
+        ctx.moveTo(endX - reticleSize, endY);
+        ctx.lineTo(endX - 5, endY);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(endX + 5, endY);
+        ctx.lineTo(endX + reticleSize, endY);
+        ctx.stroke();
+        // vertical lines
+        ctx.beginPath();
+        ctx.moveTo(endX, endY - reticleSize);
+        ctx.lineTo(endX, endY - 5);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(endX, endY + 5);
+        ctx.lineTo(endX, endY + reticleSize);
+        ctx.stroke();
+        // center circle
+        ctx.beginPath();
+        ctx.arc(endX, endY, 3, 0, Math.PI * 2);
+        ctx.stroke();
       } else {
         // miss - draw full path off-board
         const lastCell = shotPath.cells[shotPath.cells.length - 1];
@@ -741,41 +755,57 @@ document.getElementById("restartBtn").addEventListener("click", resetGame);
       if (!t.alive) return;
       const drawX = (t.rx ?? t.x);
       const drawY = (t.ry ?? t.y);
-
-      ctx.fillStyle = t.color;
-      ctx.fillRect(drawX*TILE+10, drawY*TILE+10, TILE-20, TILE-20);
-
       const cx = drawX*TILE + TILE/2;
       const cy = drawY*TILE + TILE/2;
 
-      // hull direction arrow
-      const fd = DIR4[t.facing];
-      ctx.strokeStyle = "#001018";
-      ctx.lineWidth = 4;
+      // Save context for rotation
+      ctx.save();
+      ctx.translate(cx, cy);
+
+      // Calculate hull rotation angle (DIR4: 0=N, 1=E, 2=S, 3=W)
+      const hullAngle = (t.facing * Math.PI) / 2;
+      ctx.rotate(hullAngle);
+
+      // Draw tracks (dark grey rectangles on left/right sides, protruding front/back)
+      ctx.fillStyle = "#1a1a1a";
+      ctx.fillRect(-20, -18, 6, 36);  // left track
+      ctx.fillRect(14, -18, 6, 36);   // right track
+
+      // Draw rounded hull in tank color
+      ctx.fillStyle = t.color;
+      if (ctx.roundRect) {
+        ctx.roundRect(-12, -16, 24, 32, 3);
+        ctx.fill();
+      } else {
+        // Fallback for browsers without roundRect
+        ctx.fillRect(-12, -16, 24, 32);
+      }
+
+      // Draw forward indicator stripe on the front of the hull
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(-4, -18, 8, 4);
+
+      // Draw turret (darker circle in center)
+      ctx.fillStyle = t.alive ? (t === player ? "#3a9fbf" : "#cc3f51") : "#444";
       ctx.beginPath();
-      ctx.moveTo(cx,cy);
-      ctx.lineTo(cx + fd.dx*18, cy + fd.dy*18);
-      ctx.stroke();
+      ctx.arc(0, 0, 10, 0, Math.PI * 2);
+      ctx.fill();
 
-      // turret direction line
-      const td = DIR8[t.turret];
-      const n = normalized(td.dx, td.dy);
-      const TURRET_LEN = 26;
+      ctx.restore();
 
-      ctx.strokeStyle = "#ffffff";
-      ctx.lineWidth = 3;
-      ctx.beginPath();
-      ctx.moveTo(cx, cy);
-      ctx.lineTo(
-        cx + n.dx * TURRET_LEN,
-        cy + n.dy * TURRET_LEN
-      );
-      ctx.stroke();
+      // Now draw barrel (rotated separately based on turret angle)
+      ctx.save();
+      ctx.translate(cx, cy);
 
-      // outline
-      ctx.strokeStyle = "rgba(255,255,255,0.35)";
-      ctx.lineWidth = 2;
-      ctx.strokeRect(t.x*TILE+10, t.y*TILE+10, TILE-20, TILE-20);
+      // Calculate turret rotation angle (DIR8: 45° steps)
+      const turretAngle = (t.turret * Math.PI) / 4;
+      ctx.rotate(turretAngle);
+
+      // Draw barrel
+      ctx.fillStyle = "#aaa";
+      ctx.fillRect(-2, -18, 4, 18);
+
+      ctx.restore();
 
       // HP pips above tank
       ctx.fillStyle = "#ffff00";
