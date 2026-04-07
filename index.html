@@ -953,7 +953,7 @@ document.getElementById("restartBtn").addEventListener("click", resetGame);
       // HP pips above tank
       ctx.fillStyle = "#ffff00";
       for (let i = 0; i < t.hp; i++) {
-        ctx.fillRect(t.x*TILE+10+i*10, t.y*TILE+2, 6, 6);
+        ctx.fillRect(drawX*TILE+10+i*10, drawY*TILE+2, 6, 6);
       }
     }
 
