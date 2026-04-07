@@ -49,6 +49,10 @@
   const obstacleHitSound = new Audio("https://raw.githubusercontent.com/Chadz1968/battle-tanks-web/main/battle_tank_obstacle_hit.mp3");
   obstacleHitSound.volume = 0.5;
 
+  // Create audio element for tank hit (non-lethal) sound
+  const tankHitSound = new Audio("https://raw.githubusercontent.com/Chadz1968/battle-tanks-web/main/battle_tank_hit.mp3");
+  tankHitSound.volume = 0.6;
+
   // Create audio element for engine sound (looping)
   const engineSound = new Audio("https://raw.githubusercontent.com/Chadz1968/battle-tanks-web/main/battle_tank_engine.mp3");
   engineSound.volume = 0.4;
@@ -403,7 +407,7 @@ const cpu    = { x:8, y:8, rx:8, ry:8, facing:3, turret:6, alive:true, hp:3, col
             cells,
             startTime: now,
             duration: cells.length * 60,
-            explosionEvent: isKilled ? {x: target.x, y: target.y, sound: 'explosion'} : null
+            explosionEvent: {x: target.x, y: target.y, sound: isKilled ? 'explosion' : 'hit'}
           };
         }
         return;
@@ -917,6 +921,9 @@ document.getElementById("restartBtn").addEventListener("click", resetGame);
         if (exp.sound === 'explosion') {
           explosionSound.currentTime = 0;
           explosionSound.play().catch(() => {});
+        } else if (exp.sound === 'hit') {
+          tankHitSound.currentTime = 0;
+          tankHitSound.play().catch(() => {});
         } else if (exp.sound === 'obstacle') {
           obstacleHitSound.currentTime = 0;
           obstacleHitSound.play().catch(() => {});
