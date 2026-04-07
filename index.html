@@ -100,7 +100,7 @@ function resetGame() {
   playerAnim = null;
   explosions = [];
   debris = [];
-  shakeFrames = 0;
+  shakeUntil = 0;
   message = "Your turn.";
 
   // Reset CPU animation / planning
@@ -155,7 +155,7 @@ const cpu    = { x:8, y:8, rx:8, ry:8, facing:3, turret:6, alive:true, hp:3, col
   let missileAnim = null; // {cells, startTime, duration} - current missile animation
   let explosions = []; // [{x, y, startTime}]
   let debris = []; // [{x, y, vx, vy, startTime}] - flying debris particles
-  let shakeFrames = 0; // screen shake counter
+  let shakeUntil = 0; // screen shake end time (time-based)
   let message = "Your turn.";
 
   // --- Tetromino definitions (4 blocks each) ---
@@ -388,7 +388,7 @@ const cpu    = { x:8, y:8, rx:8, ry:8, facing:3, turret:6, alive:true, hp:3, col
       const target = (fromTank === player) ? cpu : player;
       if (target.alive && target.x===x && target.y===y) {
         target.hp--;
-        shakeFrames = 15; // trigger stronger screen shake
+        shakeUntil = now + 250; // trigger screen shake for 250ms
         const isKilled = target.hp <= 0;
         if (isKilled) {
           target.alive = false;
@@ -412,7 +412,7 @@ const cpu    = { x:8, y:8, rx:8, ry:8, facing:3, turret:6, alive:true, hp:3, col
       // hit obstacle?
       if (ob[y][x] !== null) {
         ob[y][x].hp--;
-        shakeFrames = 10; // trigger screen shake
+        shakeUntil = now + 150; // trigger screen shake for 150ms
         message = (ob[y][x].hp===0)
           ? "Shot destroyed an obstacle tile (hole created)."
           : "Shot damaged an obstacle tile.";
@@ -703,10 +703,9 @@ document.getElementById("restartBtn").addEventListener("click", resetGame);
     ctx.save();
 
     // Apply screen shake
-    if (shakeFrames > 0) {
+    if (now < shakeUntil) {
       const shake = 3;
       ctx.translate(Math.random() * shake * 2 - shake, Math.random() * shake * 2 - shake);
-      shakeFrames--;
     }
 
     // Draw background texture (subtle checkerboard)
