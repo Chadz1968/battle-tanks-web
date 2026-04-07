@@ -97,6 +97,7 @@ function resetGame() {
   movesLeft = MOVE_MAX;
   lastShotTrace = [];
   missileAnim = null;
+  playerAnim = null;
   explosions = [];
   debris = [];
   shakeFrames = 0;
@@ -179,6 +180,7 @@ const cpu    = { x:8, y:8, rx:8, ry:8, facing:3, turret:6, alive:true, hp:3, col
   // CPU animation speed per tile (tweak this)
   const CPU_STEP_MS = 250;
   const CPU_THINKING_MS = 300; // pause before CPU starts moving
+  const PLAYER_MOVE_MS = 200; // Player movement animation duration
   const lerp = (a,b,t) => a + (b-a)*t;
 
   // returns normalized vector (dx,dy) with length 1, or {0,0} if input is zero
@@ -192,6 +194,9 @@ const cpu    = { x:8, y:8, rx:8, ry:8, facing:3, turret:6, alive:true, hp:3, col
 
   // { fromX,fromY,toX,toY,start,face }
   let cpuAnim = null;
+
+  // Player movement animation { fromX,fromY,toX,toY,start }
+  let playerAnim = null;
 
   // timestamp when CPU started thinking (for pause before movement)
   let cpuThinkingStart = null;
@@ -322,7 +327,7 @@ const cpu    = { x:8, y:8, rx:8, ry:8, facing:3, turret:6, alive:true, hp:3, col
     tank.turret = (tank.turret + dirDelta + 8) % 8;
   }
 
-  function tryMove(tank, forward=true) {
+  function tryMove(tank, forward=true, now=null) {
     if (movesLeft <= 0) return false;
     const d = DIR4[tank.facing];
     const dx = forward ? d.dx : -d.dx;
@@ -332,8 +337,26 @@ const cpu    = { x:8, y:8, rx:8, ry:8, facing:3, turret:6, alive:true, hp:3, col
     if (!inBounds(nx,ny)) return false;
     if (ob[ny][nx] !== null) return false;
     if (isTankAt(nx,ny)) return false;
-    tank.x = nx; tank.y = ny;
-    tank.rx = tank.x; tank.ry = tank.y;
+
+    // Set up movement animation for player tank
+    if (tank === player && now !== null) {
+      playerAnim = {
+        fromX: tank.x,
+        fromY: tank.y,
+        toX: nx,
+        toY: ny,
+        start: now
+      };
+    } else {
+      // Snap movement for non-player tanks (shouldn't happen in current code)
+      tank.x = nx;
+      tank.y = ny;
+      tank.rx = tank.x;
+      tank.ry = tank.y;
+    }
+
+    tank.x = nx;
+    tank.y = ny;
     movesLeft--;
 
     // Play engine sound for both player and CPU
@@ -638,10 +661,10 @@ window.addEventListener("keydown", (e) => {
   else if (k === "q") rotateTurret(player, -1); // 45° steps now
   else if (k === "e") rotateTurret(player, +1);
   else if (k === "w") {
-    if (!tryMove(player, true)) message = "Blocked or no moves left.";
+    if (!tryMove(player, true, performance.now())) message = "Blocked or no moves left.";
   }
   else if (k === "s") {
-    if (!tryMove(player, false)) message = "Blocked or no moves left.";
+    if (!tryMove(player, false, performance.now())) message = "Blocked or no moves left.";
   }
   else if (e.code === "Space") {
     lastShotTrace = [];
@@ -960,6 +983,18 @@ document.getElementById("restartBtn").addEventListener("click", resetGame);
       for (let i = 0; i < t.hp; i++) {
         ctx.fillRect(drawX*TILE+10+i*10, drawY*TILE+2, 6, 6);
       }
+    }
+
+    // Update player movement animation
+    if (playerAnim && now - playerAnim.start < PLAYER_MOVE_MS) {
+      const t = Math.min(1, (now - playerAnim.start) / PLAYER_MOVE_MS);
+      player.rx = lerp(playerAnim.fromX, playerAnim.toX, t);
+      player.ry = lerp(playerAnim.fromY, playerAnim.toY, t);
+    } else if (playerAnim) {
+      // Animation finished, snap to final position
+      player.rx = player.x;
+      player.ry = player.y;
+      playerAnim = null;
     }
 
     drawTank(player);
