@@ -58,7 +58,7 @@ function resetGame() {
   // Reset board
   for (let y = 0; y < GRID; y++) {
     for (let x = 0; x < GRID; x++) {
-      ob[y][x] = 0;
+      ob[y][x] = null;
     }
   }
 
@@ -121,8 +121,19 @@ const DIR8 = [
 const DIR4_NAMES = ["N","E","S","W"];
 const DIR8_NAMES = ["N","NE","E","SE","S","SW","W","NW"];
 
-// Board: obstacle HP per cell (0 means empty)
-const ob = Array.from({length:GRID}, () => Array(GRID).fill(0));
+// Tetromino colors (vibrant)
+const TETRO_COLORS = [
+  "#00ffff", // I - cyan
+  "#ffff00", // O - yellow
+  "#ff00ff", // T - magenta
+  "#00ff00", // S - lime green
+  "#ff0000", // Z - red
+  "#0099ff", // J - bright blue
+  "#ff8800", // L - orange
+];
+
+// Board: obstacle per cell {hp, tetromino} or null
+const ob = Array.from({length:GRID}, () => Array(GRID).fill(null));
 
 const player = { x:1, y:1, rx:1, ry:1, facing:1, turret:2, alive:true, hp:3, color:"#55d6ff", name:"Player" };
 const cpu    = { x:8, y:8, rx:8, ry:8, facing:3, turret:6, alive:true, hp:3, color:"#ff5b6b", name:"CPU" };
@@ -212,7 +223,7 @@ const cpu    = { x:8, y:8, rx:8, ry:8, facing:3, turret:6, alive:true, hp:3, col
 
       for (let dir=0; dir<4; dir++) {
         const nx = x + DIR4[dir].dx, ny = y + DIR4[dir].dy; // IMPORTANT: DIR4 not DIRS
-        if (inBounds(nx,ny) && ob[ny][nx] > 0) coverAdj++;
+        if (inBounds(nx,ny) && ob[ny][nx] !== null) coverAdj++;
       }
 
       const score = man - coverAdj*0.75 + d*0.15;
@@ -258,7 +269,7 @@ const cpu    = { x:8, y:8, rx:8, ry:8, facing:3, turret:6, alive:true, hp:3, col
     return (player.alive && player.x===x && player.y===y) || (cpu.alive && cpu.x===x && cpu.y===y);
   }
   function isOccupied(x,y){
-    return !inBounds(x,y) || ob[y][x]>0 || isTankAt(x,y);
+    return !inBounds(x,y) || ob[y][x]!==null || isTankAt(x,y);
   }
 
   function placeRandomObstacles(count=6) {
@@ -266,7 +277,8 @@ const cpu    = { x:8, y:8, rx:8, ry:8, facing:3, turret:6, alive:true, hp:3, col
     let placed = 0;
     while (placed < count && tries < 2000) {
       tries++;
-      const base = TETROS[Math.floor(Math.random()*TETROS.length)];
+      const tetroIndex = Math.floor(Math.random()*TETROS.length);
+      const base = TETROS[tetroIndex];
       const r = Math.floor(Math.random()*4);
       const shape = rotated(base, r);
       const ax = Math.floor(Math.random()*GRID);
@@ -277,14 +289,14 @@ const cpu    = { x:8, y:8, rx:8, ry:8, facing:3, turret:6, alive:true, hp:3, col
       for (const p of shape) {
         const x = ax + p.x, y = ay + p.y;
         if (!inBounds(x,y)) { ok=false; break; }
-        if (ob[y][x]>0) { ok=false; break; }
+        if (ob[y][x]!==null) { ok=false; break; }
         if ((x===player.x && y===player.y) || (x===cpu.x && y===cpu.y)) { ok=false; break; }
       }
       if (!ok) continue;
 
       for (const p of shape) {
         const x = ax + p.x, y = ay + p.y;
-        ob[y][x] = OB_HP_MAX;
+        ob[y][x] = {hp: OB_HP_MAX, tetromino: tetroIndex};
       }
       placed++;
     }
@@ -306,7 +318,7 @@ const cpu    = { x:8, y:8, rx:8, ry:8, facing:3, turret:6, alive:true, hp:3, col
     const nx = tank.x + dx;
     const ny = tank.y + dy;
     if (!inBounds(nx,ny)) return false;
-    if (ob[ny][nx] > 0) return false;
+    if (ob[ny][nx] !== null) return false;
     if (isTankAt(nx,ny)) return false;
     tank.x = nx; tank.y = ny;
     tank.rx = tank.x; tank.ry = tank.y;
@@ -355,9 +367,9 @@ const cpu    = { x:8, y:8, rx:8, ry:8, facing:3, turret:6, alive:true, hp:3, col
       }
 
       // hit obstacle?
-      if (ob[y][x] > 0) {
-        ob[y][x]--;
-        message = (ob[y][x]===0)
+      if (ob[y][x] !== null) {
+        ob[y][x].hp--;
+        message = (ob[y][x].hp===0)
           ? "Shot destroyed an obstacle tile (hole created)."
           : "Shot damaged an obstacle tile.";
         lastShotTrace = cells;
@@ -369,6 +381,7 @@ const cpu    = { x:8, y:8, rx:8, ry:8, facing:3, turret:6, alive:true, hp:3, col
             explosionEvent: {x: x, y: y, sound: 'obstacle'}
           };
         }
+        if (ob[y][x].hp <= 0) ob[y][x] = null;
         return;
       }
 
@@ -395,7 +408,7 @@ const cpu    = { x:8, y:8, rx:8, ry:8, facing:3, turret:6, alive:true, hp:3, col
         const nx = cur.x + DIR4[dir].dx;
         const ny = cur.y + DIR4[dir].dy;
         if (!inBounds(nx,ny)) continue;
-        if (ob[ny][nx] > 0) continue;
+        if (ob[ny][nx] !== null) continue;
         if (isTankAt(nx,ny) && !(nx===startX && ny===startY)) continue;
 
         const nk = key(nx,ny);
@@ -414,7 +427,7 @@ const cpu    = { x:8, y:8, rx:8, ry:8, facing:3, turret:6, alive:true, hp:3, col
     let y = fromY + d.dy;
     while (inBounds(x,y)) {
       if (target.alive && target.x===x && target.y===y) return true;
-      if (ob[y][x] > 0) return false;
+      if (ob[y][x] !== null) return false;
       x += d.dx; y += d.dy;
     }
     return false;
@@ -425,7 +438,7 @@ const cpu    = { x:8, y:8, rx:8, ry:8, facing:3, turret:6, alive:true, hp:3, col
     let x = fromX + d.dx;
     let y = fromY + d.dy;
     while (inBounds(x,y)) {
-      if (ob[y][x] > 0) return {x,y};
+      if (ob[y][x] !== null) return {x,y};
       if (player.alive && player.x===x && player.y===y) return null;
       x += d.dx; y += d.dy;
     }
@@ -462,7 +475,7 @@ const cpu    = { x:8, y:8, rx:8, ry:8, facing:3, turret:6, alive:true, hp:3, col
       }
 
       // stop at obstacle
-      if (ob[y][x] > 0) {
+      if (ob[y][x] !== null) {
         return {cells, hitType: 'obstacle', targetX: x, targetY: y};
       }
 
@@ -610,16 +623,25 @@ document.getElementById("restartBtn").addEventListener("click", resetGame);
     // obstacles
     for (let y=0;y<GRID;y++){
       for (let x=0;x<GRID;x++){
-        const hp = ob[y][x];
-        if (hp<=0) continue;
+        const obstacle = ob[y][x];
+        if (!obstacle) continue;
+        const hp = obstacle.hp;
+        const tetromino = obstacle.tetromino;
         const t = hp/OB_HP_MAX;
-        // darker when damaged
-        const col = `rgb(${Math.floor(90+60*t)},${Math.floor(120+50*t)},${Math.floor(90+60*t)})`;
+
+        // Get base color and darken based on HP
+        const baseColor = TETRO_COLORS[tetromino];
+        // Convert hex to rgb, darken it
+        const r = Math.floor(parseInt(baseColor.substr(1,2), 16) * t);
+        const g = Math.floor(parseInt(baseColor.substr(3,2), 16) * t);
+        const b = Math.floor(parseInt(baseColor.substr(5,2), 16) * t);
+        const col = `rgb(${r},${g},${b})`;
+
         ctx.fillStyle = col;
         ctx.fillRect(x*TILE+6, y*TILE+6, TILE-12, TILE-12);
 
         // HP pips
-        ctx.fillStyle = "#0b0f14";
+        ctx.fillStyle = "#000000";
         for (let i=0;i<hp;i++){
           ctx.fillRect(x*TILE+10+i*10, y*TILE+10, 6, 6);
         }
