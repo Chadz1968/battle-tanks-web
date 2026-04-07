@@ -411,7 +411,7 @@ const cpu    = { x:8, y:8, rx:8, ry:8, facing:3, turret:6, alive:true, hp:3, col
 
           for (let i = 0; i < 7; i++) {
             const angle = (i / 7) * Math.PI * 2;
-            const speed = 2 + Math.random() * 1.5;
+            const speed = 0.5 + Math.random() * 0.4; // Slow motion - reduced from 2-3.5 to 0.5-0.9
             debris.push({
               x: cx,
               y: cy,
@@ -737,24 +737,33 @@ document.getElementById("restartBtn").addEventListener("click", resetGame);
 
         // Draw cracks based on HP
         if (hp === 2) {
-          // One crack line
+          // One zigzag crack line
           ctx.strokeStyle = "rgba(0, 0, 0, 0.5)";
           ctx.lineWidth = 1;
           ctx.beginPath();
           ctx.moveTo(px + 4, py + ph - 4);
+          ctx.lineTo(px + pw * 0.25, py + ph * 0.75);
+          ctx.lineTo(px + pw * 0.5, py + ph * 0.5);
+          ctx.lineTo(px + pw * 0.75, py + ph * 0.25);
           ctx.lineTo(px + pw - 4, py + 4);
           ctx.stroke();
         } else if (hp === 1) {
-          // Two cracks + desaturated color
+          // Two zigzag cracks + desaturated color
           ctx.strokeStyle = "rgba(0, 0, 0, 0.7)";
           ctx.lineWidth = 1.5;
+          // Left crack
           ctx.beginPath();
           ctx.moveTo(px + 3, py + ph - 3);
-          ctx.lineTo(px + pw / 2, py + ph / 2);
+          ctx.lineTo(px + pw * 0.2, py + ph * 0.7);
+          ctx.lineTo(px + pw * 0.35, py + ph * 0.55);
+          ctx.lineTo(px + pw * 0.5, py + ph / 2);
           ctx.stroke();
+          // Right crack
           ctx.beginPath();
           ctx.moveTo(px + pw - 3, py + 3);
-          ctx.lineTo(px + pw / 2, py + ph / 2);
+          ctx.lineTo(px + pw * 0.8, py + ph * 0.3);
+          ctx.lineTo(px + pw * 0.65, py + ph * 0.45);
+          ctx.lineTo(px + pw * 0.5, py + ph / 2);
           ctx.stroke();
         }
       }
@@ -990,14 +999,14 @@ document.getElementById("restartBtn").addEventListener("click", resetGame);
     }
 
     // Draw debris particles
-    const DEBRIS_DURATION = 600;
+    const DEBRIS_DURATION = 1200; // Extended duration for slow-motion effect
     debris = debris.filter(d => now - d.startTime < DEBRIS_DURATION);
     for (const d of debris) {
       try {
         const age = now - d.startTime;
         const progress = age / DEBRIS_DURATION;
-        const px = d.x + d.vx * age * 0.1;
-        const py = d.y + d.vy * age * 0.1;
+        const px = d.x + d.vx * age * 0.05; // Reduced multiplier for slower movement
+        const py = d.y + d.vy * age * 0.05;
         const size = 4 * (1 - progress);
 
         // Safely parse color
