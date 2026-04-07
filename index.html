@@ -95,6 +95,7 @@ function resetGame() {
   // Reset CPU animation / planning
   cpuPlan = null;
   cpuAnim = null;
+  cpuThinkingStart = null;
 }
 
   // Hull directions (90°): 0=N,1=E,2=S,3=W
@@ -153,7 +154,8 @@ const cpu    = { x:8, y:8, rx:8, ry:8, facing:3, turret:6, alive:true, hp:3, col
   ];
 
   // CPU animation speed per tile (tweak this)
-  const CPU_STEP_MS = 160; 
+  const CPU_STEP_MS = 250;
+  const CPU_THINKING_MS = 300; // pause before CPU starts moving
   const lerp = (a,b,t) => a + (b-a)*t;
 
   // returns normalized vector (dx,dy) with length 1, or {0,0} if input is zero
@@ -167,6 +169,9 @@ const cpu    = { x:8, y:8, rx:8, ry:8, facing:3, turret:6, alive:true, hp:3, col
 
   // { fromX,fromY,toX,toY,start,face }
   let cpuAnim = null;
+
+  // timestamp when CPU started thinking (for pause before movement)
+  let cpuThinkingStart = null;
 
   function buildCpuPlan() {
   // reset per-turn movement budget
@@ -476,7 +481,14 @@ const cpu    = { x:8, y:8, rx:8, ry:8, facing:3, turret:6, alive:true, hp:3, col
   if (!cpuPlan) {
     message = "CPU thinking...";
     cpuPlan = buildCpuPlan();
-    message = "CPU moving...";
+    cpuThinkingStart = now;
+    return; // wait for thinking pause
+  }
+
+  // Wait for thinking pause before starting movement
+  if (now - cpuThinkingStart < CPU_THINKING_MS) {
+    message = "CPU thinking...";
+    return;
   }
 
   // If we’re currently animating a step, update interpolation
@@ -532,6 +544,7 @@ const cpu    = { x:8, y:8, rx:8, ry:8, facing:3, turret:6, alive:true, hp:3, col
   // cleanup and pass turn back
   cpuPlan = null;
   cpuAnim = null;
+  cpuThinkingStart = null;
 
   if (state !== "GAME_OVER") {
     state = "PLAYER_TURN";
@@ -567,6 +580,7 @@ window.addEventListener("keydown", (e) => {
       // reset CPU anim state so CPU starts planning from scratch
       cpuPlan = null;
       cpuAnim = null;
+      cpuThinkingStart = null;
     }
   }
   else if (isShift) {
@@ -574,6 +588,7 @@ window.addEventListener("keydown", (e) => {
     message = "CPU turn...";
     cpuPlan = null;
     cpuAnim = null;
+    cpuThinkingStart = null;
   }
 
   e.preventDefault();
