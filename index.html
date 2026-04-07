@@ -627,7 +627,7 @@ document.getElementById("restartBtn").addEventListener("click", resetGame);
     }
 
     // shot preview (during player turn)
-    if (state === "PLAYER_TURN" && player.alive) {
+    if (state === "PLAYER_TURN" && player.alive && player.turret >= 0 && player.turret < 8) {
       const shotPath = computeShotPath(player);
 
       // draw dashed line from turret along path
