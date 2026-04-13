@@ -767,36 +767,79 @@ document.getElementById("restartBtn").addEventListener("click", resetGame);
         ctx.fillRect(px + 2, py + ph - 2, pw - 2, 2);
         ctx.fillRect(px + pw - 2, py + 2, 2, ph - 2);
 
-        // Draw cracks based on HP
-        if (hp === 2) {
-          // One zigzag crack line
-          ctx.strokeStyle = "rgba(0, 0, 0, 0.5)";
-          ctx.lineWidth = 1;
+        // Draw damage cracks — seeded per block so each tile gets unique cracks
+        if (hp < OB_HP_MAX) {
+          // Deterministic pseudo-random keyed to grid position
+          const seed = x * 127 + y * 1009;
+          const r = (n) => { const v = Math.sin(seed * 12.9898 + n * 78.233) * 43758.5453; return v - Math.floor(v); };
+
+          // Impact epicentre — offset from block centre, varies per tile
+          const ix = px + pw * (0.25 + r(0) * 0.5);
+          const iy = py + ph * (0.25 + r(1) * 0.5);
+
+          const numCracks = hp === 1 ? 5 : 3;
+
+          for (let c = 0; c < numCracks; c++) {
+            // Build crack path as point array
+            const pts = [[ix, iy]];
+            let cx = ix, cy = iy;
+            let angle = (c / numCracks) * Math.PI * 2 + r(c + 2) * 1.2;
+            const totalLen = pw * (0.28 + r(c + 10) * 0.28);
+            const segs = 2 + Math.floor(r(c + 20) * 2); // 2–3 segments
+            for (let s = 0; s < segs; s++) {
+              angle += (r(c * 3 + s + 30) - 0.5) * 0.9;
+              cx = Math.max(px + 1, Math.min(px + pw - 1, cx + Math.cos(angle) * totalLen / segs));
+              cy = Math.max(py + 1, Math.min(py + ph - 1, cy + Math.sin(angle) * totalLen / segs));
+              pts.push([cx, cy]);
+            }
+
+            // Light underside of crack (depth)
+            ctx.strokeStyle = "rgba(255,255,255,0.25)";
+            ctx.lineWidth = hp === 1 ? 2 : 1.5;
+            ctx.beginPath();
+            ctx.moveTo(pts[0][0] + 0.7, pts[0][1] + 0.7);
+            for (let p = 1; p < pts.length; p++) ctx.lineTo(pts[p][0] + 0.7, pts[p][1] + 0.7);
+            ctx.stroke();
+
+            // Dark crack on top
+            ctx.strokeStyle = hp === 1 ? "rgba(0,0,0,0.82)" : "rgba(0,0,0,0.58)";
+            ctx.lineWidth = hp === 1 ? 1.5 : 1;
+            ctx.beginPath();
+            ctx.moveTo(pts[0][0], pts[0][1]);
+            for (let p = 1; p < pts.length; p++) ctx.lineTo(pts[p][0], pts[p][1]);
+            ctx.stroke();
+          }
+
+          // Impact dot at epicentre
+          const dotR = hp === 1 ? 3 : 2;
+          ctx.fillStyle = "rgba(0,0,0,0.7)";
           ctx.beginPath();
-          ctx.moveTo(px + 4, py + ph - 4);
-          ctx.lineTo(px + pw * 0.25, py + ph * 0.75);
-          ctx.lineTo(px + pw * 0.5, py + ph * 0.5);
-          ctx.lineTo(px + pw * 0.75, py + ph * 0.25);
-          ctx.lineTo(px + pw - 4, py + 4);
-          ctx.stroke();
-        } else if (hp === 1) {
-          // Two zigzag cracks + desaturated color
-          ctx.strokeStyle = "rgba(0, 0, 0, 0.7)";
-          ctx.lineWidth = 1.5;
-          // Left crack
+          ctx.arc(ix, iy, dotR, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = "rgba(255,255,255,0.3)";
           ctx.beginPath();
-          ctx.moveTo(px + 3, py + ph - 3);
-          ctx.lineTo(px + pw * 0.2, py + ph * 0.7);
-          ctx.lineTo(px + pw * 0.35, py + ph * 0.55);
-          ctx.lineTo(px + pw * 0.5, py + ph / 2);
-          ctx.stroke();
-          // Right crack
-          ctx.beginPath();
-          ctx.moveTo(px + pw - 3, py + 3);
-          ctx.lineTo(px + pw * 0.8, py + ph * 0.3);
-          ctx.lineTo(px + pw * 0.65, py + ph * 0.45);
-          ctx.lineTo(px + pw * 0.5, py + ph / 2);
-          ctx.stroke();
+          ctx.arc(ix - 0.6, iy - 0.6, dotR * 0.55, 0, Math.PI * 2);
+          ctx.fill();
+
+          // Corner chips at HP 1 — ~50% chance per corner based on seed
+          if (hp === 1) {
+            const chip = 9;
+            const corners = [
+              [px,      py,      px + chip, py,      px,      py + chip],
+              [px + pw, py,      px+pw-chip, py,     px + pw, py + chip],
+              [px,      py + ph, px + chip, py + ph, px,      py+ph-chip],
+              [px + pw, py + ph, px+pw-chip, py+ph,  px + pw, py+ph-chip],
+            ];
+            ctx.fillStyle = "rgba(0,0,0,0.45)";
+            for (let co = 0; co < 4; co++) {
+              if (r(co + 60) > 0.45) {
+                const [x1,y1,x2,y2,x3,y3] = corners[co];
+                ctx.beginPath();
+                ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.lineTo(x3, y3);
+                ctx.closePath(); ctx.fill();
+              }
+            }
+          }
         }
       }
     }
