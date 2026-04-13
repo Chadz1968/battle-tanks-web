@@ -648,6 +648,7 @@ const cpu    = { x:8, y:8, rx:8, ry:8, facing:3, turret:6, alive:true, hp:3, col
 window.addEventListener("keydown", (e) => {
   if (state === "GAME_OVER") return;
   if (state !== "PLAYER_TURN") return; // lock input during CPU animation
+  if (missileAnim) return; // block all input while any missile is in flight
 
   // Stop engine sound on any input during player turn (fresh start for next move)
   engineSound.pause();
