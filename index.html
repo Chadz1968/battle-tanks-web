@@ -63,16 +63,7 @@ function resetGame() {
   // Stop all sounds
   engineSound.pause();
 
-  // Reset board
-  for (let y = 0; y < GRID; y++) {
-    for (let x = 0; x < GRID; x++) {
-      ob[y][x] = null;
-    }
-  }
-
-  placeRandomObstacles(7);
-
-  // Reset player
+  // Reset player first so obstacle placement can avoid spawn cells
   player.x = 1;
   player.y = 1;
   player.rx = 1;
@@ -91,6 +82,15 @@ function resetGame() {
   cpu.turret = 6;
   cpu.alive = true;
   cpu.hp = 3;
+
+  // Clear board then place obstacles (tanks already at spawn positions, so collision check is correct)
+  for (let y = 0; y < GRID; y++) {
+    for (let x = 0; x < GRID; x++) {
+      ob[y][x] = null;
+    }
+  }
+
+  placeRandomObstacles(7);
 
   // Reset turn state
   state = "PLAYER_TURN";
@@ -307,7 +307,9 @@ const cpu    = { x:8, y:8, rx:8, ry:8, facing:3, turret:6, alive:true, hp:3, col
         const x = ax + p.x, y = ay + p.y;
         if (!inBounds(x,y)) { ok=false; break; }
         if (ob[y][x]!==null) { ok=false; break; }
-        if ((x===player.x && y===player.y) || (x===cpu.x && y===cpu.y)) { ok=false; break; }
+        // Keep a 2-tile clear zone around each tank's spawn cell
+        if (Math.abs(x-player.x)<=1 && Math.abs(y-player.y)<=1) { ok=false; break; }
+        if (Math.abs(x-cpu.x)<=1 && Math.abs(y-cpu.y)<=1) { ok=false; break; }
       }
       if (!ok) continue;
 
@@ -649,10 +651,6 @@ window.addEventListener("keydown", (e) => {
   if (state === "GAME_OVER") return;
   if (state !== "PLAYER_TURN") return; // lock input during CPU animation
   if (missileAnim) return; // block all input while any missile is in flight
-
-  // Stop engine sound on any input during player turn (fresh start for next move)
-  engineSound.pause();
-  engineSound.currentTime = 0;
 
   const k = e.key.toLowerCase();
   const isShift = (e.key === "Shift");
@@ -1063,6 +1061,9 @@ document.getElementById("restartBtn").addEventListener("click", resetGame);
           player.rx = player.x;
           player.ry = player.y;
           playerAnim = null;
+          // Stop engine sound — tank has come to rest
+          engineSound.pause();
+          engineSound.currentTime = 0;
         }
       } catch (e) {
         console.error("Player animation error:", e);
@@ -1164,6 +1165,42 @@ document.getElementById("restartBtn").addEventListener("click", resetGame);
 
     if (state === "CPU_TURN" && cpu.alive && player.alive) {
       cpuTakeTurn(now);
+    }
+
+    // --- Game Over overlay ---
+    if (state === "GAME_OVER") {
+      const W = canvas.width, H = canvas.height;
+      // Dim the board
+      ctx.fillStyle = "rgba(0,0,0,0.55)";
+      ctx.fillRect(0, 0, W, H);
+
+      // Panel
+      const panelW = 420, panelH = 180;
+      const px = (W - panelW) / 2, py = (H - panelH) / 2;
+      ctx.fillStyle = "#1a1f2a";
+      ctx.strokeStyle = "#ffcc00";
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.roundRect(px, py, panelW, panelH, 16);
+      ctx.fill();
+      ctx.stroke();
+
+      // "GAME OVER!" heading
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.font = "bold 48px system-ui, Arial";
+      ctx.fillStyle = "#ffcc00";
+      ctx.fillText("GAME OVER!", W / 2, py + 58);
+
+      // Winner line — parse from the message set when a tank dies
+      ctx.font = "bold 24px system-ui, Arial";
+      ctx.fillStyle = "#ffffff";
+      ctx.fillText(message, W / 2, py + 116);
+
+      // Restart hint
+      ctx.font = "16px system-ui, Arial";
+      ctx.fillStyle = "#aabb";
+      ctx.fillText("Press the Restart button to play again", W / 2, py + 155);
     }
 
     ctx.restore(); // Restore context after screen shake
