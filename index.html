@@ -1009,6 +1009,7 @@ document.getElementById("restartBtn").addEventListener("click", resetGame);
       // Draw rounded hull in tank color
       ctx.fillStyle = t.color;
       if (ctx.roundRect) {
+        ctx.beginPath();
         ctx.roundRect(-12, -16, 24, 32, 3);
         ctx.fill();
       } else {
