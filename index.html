@@ -178,9 +178,9 @@ const cpu    = { x:8, y:8, rx:8, ry:8, facing:3, turret:6, alive:true, hp:3, col
   ];
 
   // CPU animation speed per tile (tweak this)
-  const CPU_STEP_MS = 250;
+  const CPU_STEP_MS = 500;
   const CPU_THINKING_MS = 300; // pause before CPU starts moving
-  const PLAYER_MOVE_MS = 200; // Player movement animation duration
+  const PLAYER_MOVE_MS = 600; // Player movement animation duration
   const lerp = (a,b,t) => a + (b-a)*t;
 
   // returns normalized vector (dx,dy) with length 1, or {0,0} if input is zero
@@ -650,7 +650,8 @@ const cpu    = { x:8, y:8, rx:8, ry:8, facing:3, turret:6, alive:true, hp:3, col
 window.addEventListener("keydown", (e) => {
   if (state === "GAME_OVER") return;
   if (state !== "PLAYER_TURN") return; // lock input during CPU animation
-  if (missileAnim) return; // block all input while any missile is in flight
+  if (missileAnim) return;   // block all input while any missile is in flight
+  if (playerAnim)  return;   // block input while tank is still rolling to its destination
 
   const k = e.key.toLowerCase();
   const isShift = (e.key === "Shift");
@@ -853,8 +854,8 @@ document.getElementById("restartBtn").addEventListener("click", resetGame);
 
       const td = DIR8[player.turret];
       const n = normalized(td.dx, td.dy);
-      const startX = player.x * TILE + TILE / 2;
-      const startY = player.y * TILE + TILE / 2;
+      const startX = (player.rx ?? player.x) * TILE + TILE / 2;
+      const startY = (player.ry ?? player.y) * TILE + TILE / 2;
 
       if (shotPath.targetX !== null) {
         const endX = shotPath.targetX * TILE + TILE / 2;
@@ -991,13 +992,23 @@ document.getElementById("restartBtn").addEventListener("click", resetGame);
       const cx = drawX*TILE + TILE/2;
       const cy = drawY*TILE + TILE/2;
 
+      // Sherman-tank roll wobble while moving
+      let wobble = 0;
+      if (t === player && playerAnim) {
+        const prog = Math.min(1, (now - playerAnim.start) / PLAYER_MOVE_MS);
+        wobble = Math.sin(prog * Math.PI * 6) * 0.07; // 3 oscillations, ~4° peak
+      } else if (t === cpu && cpuAnim) {
+        const prog = Math.min(1, (now - cpuAnim.start) / CPU_STEP_MS);
+        wobble = Math.sin(prog * Math.PI * 6) * 0.07;
+      }
+
       // Save context for rotation
       ctx.save();
       ctx.translate(cx, cy);
 
       // Calculate hull rotation angle (DIR4: 0=N, 1=E, 2=S, 3=W)
       const hullAngle = (t.facing * Math.PI) / 2;
-      ctx.rotate(hullAngle);
+      ctx.rotate(hullAngle + wobble);
 
       // Draw tracks (dark grey rectangles on left/right sides, protruding front/back)
       ctx.fillStyle = "#1a1a1a";
@@ -1168,7 +1179,8 @@ document.getElementById("restartBtn").addEventListener("click", resetGame);
     }
 
     // --- Game Over overlay ---
-    if (state === "GAME_OVER") {
+    // Wait for the missile to land and the explosion to fully play out before showing
+    if (state === "GAME_OVER" && !missileAnim && explosions.length === 0) {
       const W = canvas.width, H = canvas.height;
       // Dim the board
       ctx.fillStyle = "rgba(0,0,0,0.55)";
